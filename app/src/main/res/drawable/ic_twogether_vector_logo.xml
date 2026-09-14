@@ -1,0 +1,56 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Calendar Card Base -->
+    <path
+        android:pathData="M28,26 C28,22.68 30.68,20 34,20 L74,20 C77.32,20 80,22.68 80,26 L80,82 C80,85.32 77.32,88 74,88 L34,88 C30.68,88 28,85.32 28,82 Z"
+        android:strokeWidth="2.5"
+        android:strokeColor="#38BDF8"
+        android:fillColor="#0F172A" />
+
+    <!-- Top Calendar Header Banner -->
+    <path
+        android:pathData="M28,26 C28,22.68 30.68,20 34,20 L74,20 C77.32,20 80,22.68 80,26 L80,38 L28,38 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="28"
+                android:startY="20"
+                android:endX="80"
+                android:endY="38"
+                android:type="linear">
+                <item android:color="#F43F5E" android:offset="0.0" />
+                <item android:color="#3B82F6" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Calendar Rings -->
+    <path
+        android:pathData="M40,16 L40,24 M68,16 L68,24"
+        android:strokeWidth="3.5"
+        android:strokeColor="#FACC15"
+        android:strokeLineCap="round" />
+
+    <!-- Two Entwined Glowing Hearts -->
+    <!-- Cyan Heart (Partner 1) -->
+    <path
+        android:pathData="M46,55 C41,47 33,50 33,57 C33,66 49,76 49,76 C49,76 52,73 54,71 C51,69 49,65 49,60 C49,57 51,54 53,52 C51,52 48,53 46,55 Z"
+        android:fillColor="#38BDF8" />
+
+    <!-- Coral Rose Heart (Partner 2) -->
+    <path
+        android:pathData="M62,55 C57,55 54,58 54,61 C54,68 70,78 70,78 C70,78 82,68 82,61 C82,54 74,51 70,58 C68,55 65,55 62,55 Z"
+        android:fillColor="#F43F5E" />
+
+    <!-- Sparkle Stars -->
+    <path
+        android:pathData="M54,44 L55.5,47.5 L59,49 L55.5,50.5 L54,54 L52.5,50.5 L49,49 L52.5,47.5 Z"
+        android:fillColor="#FDE047" />
+    <path
+        android:pathData="M72,30 L73,32 L75,33 L73,34 L72,36 L71,34 L69,33 L71,32 Z"
+        android:fillColor="#FFFFFF" />
+</vector>

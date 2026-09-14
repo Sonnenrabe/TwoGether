@@ -1,0 +1,6 @@
+{
+  "name": "TwoGether",
+  "description": "Shared calendar and notebook app for couples to plan events, create and share notes and checklists with partner sync, widgets, and multilingual support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
