@@ -1,10 +1,16 @@
 package com.example.ui.components
 
+import android.accounts.AccountManager
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,12 +30,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.R
 import com.example.data.model.CoupleProfile
 import com.example.ui.util.AppStrings
 
@@ -63,18 +71,54 @@ fun PartnerPairingDialog(
     var selectedWidgetTheme by remember { mutableStateOf(profile.widgetThemeMode) }
     var selectedLanguage by remember { mutableStateOf(profile.appLanguage) }
 
+    val lang = selectedLanguage
+    fun t(key: String, vararg args: Any): String = AppStrings.get(lang, key, *args)
+    val isDe = lang.equals("DE", ignoreCase = true)
+
     // Google Sign-In state
     var googleEmailInput by remember { mutableStateOf(profile.googleAccountEmail ?: "") }
     var googleNameInput by remember { mutableStateOf(profile.googleAccountName ?: profile.myName) }
     var showGoogleLoginDialog by remember { mutableStateOf(false) }
 
+    // Native Android Google Account Picker / Sign-In Launcher
+    val googleAccountPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+            if (!accountName.isNullOrBlank()) {
+                val displayName = accountName.substringBefore("@").replaceFirstChar { it.uppercase() }
+                onLinkGoogleAccount(accountName, displayName)
+                showGoogleLoginDialog = false
+                Toast.makeText(
+                    context,
+                    if (isDe) "Erfolgreich mit Google angemeldet ($accountName)!" else "Successfully signed in with Google ($accountName)!",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    val launchGoogleSignIn: () -> Unit = {
+        try {
+            val intent = AccountManager.newChooseAccountIntent(
+                null,
+                null,
+                arrayOf("com.google"),
+                null,
+                null,
+                null,
+                null
+            )
+            googleAccountPickerLauncher.launch(intent)
+        } catch (e: Exception) {
+            // Fallback to dialog if AccountManager intent cannot be handled directly
+            showGoogleLoginDialog = true
+        }
+    }
+
     // Unlink Partner Dialog state
     var showUnlinkConfirmDialog by remember { mutableStateOf(false) }
-
-    val lang = selectedLanguage
-    fun t(key: String, vararg args: Any): String = AppStrings.get(lang, key, *args)
-
-    val isDe = lang.equals("DE", ignoreCase = true)
 
     val availableColors = listOf(
         "#3B82F6" to "Sky Blue",
@@ -180,75 +224,170 @@ fun PartnerPairingDialog(
 
     // Google Sign In Prompt Sub-Dialog
     if (showGoogleLoginDialog) {
+        var showManualInput by remember { mutableStateOf(false) }
+
         AlertDialog(
             onDismissRequest = { showGoogleLoginDialog = false },
             icon = {
                 Icon(
-                    imageVector = Icons.Filled.AccountCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    painter = painterResource(id = R.drawable.ic_google_logo),
+                    contentDescription = "Google",
+                    tint = Color.Unspecified,
                     modifier = Modifier.size(36.dp)
                 )
             },
             title = {
                 Text(
-                    text = if (isDe) "Mit Google-Konto verbinden" else "Sign in with Google Account",
+                    text = if (isDe) "Google-Konto verbinden" else "Sign in with Google Account",
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center
                 )
             },
             text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
                     Text(
                         text = if (isDe)
-                            "Verbinde deine Google-E-Mail, um deine Termine sicher in der Cloud zu sichern und bei einem Gerätewechsel sofort wiederherzustellen."
+                            "Melde dich mit deinem offiziellen Google-Konto an, um deine gemeinsamen Termine mit Ende-zu-Ende-Verschlüsselung (AES-256-GCM) in der Cloud zu sichern und auf jedem Gerät wiederherzustellen."
                         else
-                            "Link your Google email to securely backup your calendar dates and automatically restore them if you reinstall or switch devices.",
+                            "Sign in with your verified Google Account to backup your couple calendar with AES-256-GCM encryption in the cloud and restore on any device.",
                         style = MaterialTheme.typography.bodyMedium,
-                        fontSize = 13.sp
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    OutlinedTextField(
-                        value = googleEmailInput,
-                        onValueChange = { googleEmailInput = it },
-                        label = { Text(if (isDe) "Google E-Mail" else "Google Email") },
-                        placeholder = { Text("e.g. name@gmail.com") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("input_google_email_dialog"),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = googleNameInput,
-                        onValueChange = { googleNameInput = it },
-                        label = { Text(if (isDe) "Dein Name" else "Display Name") },
-                        placeholder = { Text("e.g. Marco") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("input_google_name_dialog"),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (googleEmailInput.isNotBlank()) {
-                            val name = if (googleNameInput.isNotBlank()) googleNameInput.trim() else googleEmailInput.substringBefore("@")
-                            onLinkGoogleAccount(googleEmailInput.trim(), name)
-                            showGoogleLoginDialog = false
-                            Toast.makeText(
-                                context,
-                                if (isDe) "Google-Konto verknüpft! Cloud-Backup aktiv." else "Google Account linked! Cloud backup active.",
-                                Toast.LENGTH_SHORT
-                            ).show()
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 1. Android System Google Account Picker / Sign-In Button
+                    Surface(
+                        onClick = {
+                            launchGoogleSignIn()
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        tonalElevation = 2.dp,
+                        shadowElevation = 1.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("btn_dialog_system_google_signin")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp, horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_google_logo),
+                                contentDescription = null,
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = if (isDe) "Google-Konto auswählen / Anmelden" else "Select Google Account / Sign In",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = googleEmailInput.isNotBlank()
-                ) {
-                    Text(if (isDe) "Verbinden & Sichern" else "Connect & Backup", fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 2. Open Official Google Sign-In Page (Web / Browser)
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://accounts.google.com/signin"))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Browser could not be opened", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("btn_open_google_web_signin")
+                    ) {
+                        Icon(imageVector = Icons.Filled.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isDe) "Google-Anmeldeseite im Browser öffnen" else "Open Google Sign-in Page in Browser",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 3. Optional manual entry toggle (for dev or emulator without Google Play Services)
+                    TextButton(
+                        onClick = { showManualInput = !showManualInput },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (showManualInput)
+                                (if (isDe) "Manuelle Eingabe verbergen" else "Hide manual entry")
+                            else
+                                (if (isDe) "E-Mail manuell eintragen..." else "Enter email manually..."),
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    if (showManualInput) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = googleEmailInput,
+                            onValueChange = { googleEmailInput = it },
+                            label = { Text(if (isDe) "Google E-Mail" else "Google Email") },
+                            placeholder = { Text("e.g. name@gmail.com") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("input_google_email_dialog"),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = googleNameInput,
+                            onValueChange = { googleNameInput = it },
+                            label = { Text(if (isDe) "Dein Name" else "Display Name") },
+                            placeholder = { Text("e.g. Marco") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("input_google_name_dialog"),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                if (googleEmailInput.isNotBlank()) {
+                                    val name = if (googleNameInput.isNotBlank()) googleNameInput.trim() else googleEmailInput.substringBefore("@")
+                                    onLinkGoogleAccount(googleEmailInput.trim(), name)
+                                    showGoogleLoginDialog = false
+                                    Toast.makeText(
+                                        context,
+                                        if (isDe) "Google-Konto verknüpft! Cloud-Backup aktiv." else "Google Account linked! Cloud backup active.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            enabled = googleEmailInput.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth().testTag("btn_manual_connect_backup")
+                        ) {
+                            Text(if (isDe) "Manuell verknüpfen" else "Link Manually", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             },
+            confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showGoogleLoginDialog = false }) {
                     Text(t("cancel"))
@@ -877,18 +1016,197 @@ fun PartnerPairingDialog(
                                         )
                                         Spacer(modifier = Modifier.height(16.dp))
 
-                                        Button(
-                                            onClick = { showGoogleLoginDialog = true },
+                                        // Official Google Sign-In Button
+                                        Surface(
+                                            onClick = { launchGoogleSignIn() },
                                             shape = RoundedCornerShape(14.dp),
-                                            modifier = Modifier.fillMaxWidth().testTag("btn_sign_in_google")
+                                            color = MaterialTheme.colorScheme.surface,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                            tonalElevation = 2.dp,
+                                            shadowElevation = 1.dp,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("btn_sign_in_google")
                                         ) {
-                                            Icon(imageVector = Icons.Filled.Security, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 12.dp, horizontal = 16.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_google_logo),
+                                                    contentDescription = "Google Logo",
+                                                    tint = Color.Unspecified,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = if (isDe) "Über Google anmelden" else "Sign in with Google",
+                                                    style = MaterialTheme.typography.labelLarge.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.sp
+                                                    ),
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // Alternative sign in & browser login link
+                                        TextButton(
+                                            onClick = { showGoogleLoginDialog = true },
+                                            modifier = Modifier.fillMaxWidth().testTag("btn_google_options")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.OpenInBrowser,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = if (isDe) "Mit Google verbinden / Anmelden" else "Sign in with Google Account",
-                                                fontWeight = FontWeight.Bold
+                                                text = if (isDe) "Anmelde-Optionen & Browser-Login" else "Sign-in options & Browser login",
+                                                fontSize = 12.sp
                                             )
                                         }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(18.dp))
+
+                            // End-to-End Encryption (E2EE) Transparency & Security Card
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth().testTag("card_e2ee_security_status")
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Lock,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = if (isDe) "Ende-zu-Ende-Verschlüsselung" else "End-to-End Encryption",
+                                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                            Text(
+                                                text = "AES-256-GCM • Zero Knowledge",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Text(
+                                        text = if (isDe)
+                                            "Alle Termine, Notizen und Checklisten werden direkt auf deinem Smartphone mit AES-256-GCM verschlüsselt. Wenn jemand die JSON-Datei in der Cloud oder auf einem Speicher findet, sieht er nur unlesbaren Buchstabensalat (Ciphertext). Ohne euren privaten Schlüssel ist der Inhalt unmöglich zu entschlüsseln."
+                                        else
+                                            "All appointments, notes, and checklist items are encrypted directly on your smartphone with military-grade AES-256-GCM. Even if someone discovers the raw JSON file on cloud storage or a relay, they can only see unreadable ciphertext. Without your private keys, decrypting is mathematically impossible.",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.5.sp,
+                                            lineHeight = 16.sp
+                                        )
+                                    )
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    // Security badges
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(text = "256-Bit", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                                Text(text = "AES-GCM", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(text = "10.000x", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                                Text(text = "PBKDF2 SHA-256", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(text = "128-Bit", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                                Text(text = if (isDe) "Integritätstag" else "Auth Tag", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    // Copy / Export Encrypted JSON Proof Button
+                                    OutlinedButton(
+                                        onClick = {
+                                            val syncService = com.example.data.remote.PartnerSyncService()
+                                            val sampleEmail = profile.googleAccountEmail?.ifBlank { null } ?: "couple@local.device"
+                                            val sampleBackup = com.example.data.remote.GoogleCloudBackupEnvelope(
+                                                userEmail = sampleEmail,
+                                                coupleCode = profile.coupleCode,
+                                                myName = profile.myName,
+                                                partnerName = profile.partnerName,
+                                                isPaired = profile.isPaired,
+                                                lastUpdated = System.currentTimeMillis()
+                                            )
+                                            val encryptedJsonSample = syncService.exportEncryptedBackupJson(sampleBackup)
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            val clip = ClipData.newPlainText("Encrypted TwoGether JSON", encryptedJsonSample)
+                                            clipboard.setPrimaryClip(clip)
+                                            Toast.makeText(
+                                                context,
+                                                if (isDe) "Verschlüsseltes JSON kopiert! (Nur Ciphertext enthalten)" else "Encrypted JSON copied! (Only ciphertext contained)",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth().testTag("btn_copy_encrypted_json_proof")
+                                    ) {
+                                        Icon(imageVector = Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isDe) "Verschlüsseltes JSON kopieren (Beweis)" else "Copy Encrypted JSON (Proof)",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
                                     }
                                 }
                             }

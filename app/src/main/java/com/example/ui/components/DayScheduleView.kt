@@ -24,7 +24,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -120,25 +122,22 @@ fun DayScheduleView(
                 }
             }
 
-            // Quick Add Event Button
-            FilledTonalButton(
+            // Quick Add Event Button (Compact + icon button)
+            FilledTonalIconButton(
                 onClick = onAddClick,
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.filledTonalButtonColors(
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ),
-                modifier = Modifier.testTag("btn_quick_add_appointment")
+                modifier = Modifier
+                    .size(40.dp)
+                    .testTag("btn_quick_add_appointment")
             ) {
                 Icon(
                     imageVector = Icons.Filled.Add,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = t("add_appointment"),
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    contentDescription = t("add_appointment"),
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
