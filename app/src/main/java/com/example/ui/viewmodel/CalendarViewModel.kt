@@ -457,6 +457,18 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         _isDetailDialogOpen.value = true
     }
 
+    fun openAppointmentById(id: String) {
+        viewModelScope.launch {
+            val appt = repository.getAppointmentById(id)
+            if (appt != null) {
+                _selectedDateMillis.value = appt.startEpochMillis
+                _displayMonthMillis.value = appt.startEpochMillis
+                _selectedDetailAppointment.value = appt
+                _isDetailDialogOpen.value = true
+            }
+        }
+    }
+
     fun closeDetailDialog() {
         _isDetailDialogOpen.value = false
         _selectedDetailAppointment.value = null

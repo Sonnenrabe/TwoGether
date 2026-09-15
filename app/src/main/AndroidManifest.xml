@@ -51,6 +51,12 @@
             android:name=".receiver.AppointmentAlarmReceiver"
             android:exported="false" />
 
+        <!-- RemoteViews Service for Scrollable Widget Appointment List -->
+        <service
+            android:name=".widget.WidgetAppointmentListService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false" />
+
     </application>
 
 </manifest>

@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.view.View
 import android.widget.RemoteViews
 import com.example.MainActivity
@@ -62,6 +63,7 @@ object WidgetUpdateHelper {
         if (appWidgetIds != null && appWidgetIds.isNotEmpty()) {
             CoroutineScope(Dispatchers.IO).launch {
                 for (id in appWidgetIds) {
+                    appWidgetManager.notifyAppWidgetViewDataChanged(id, R.id.widget_appointment_list)
                     updateAppWidget(context, appWidgetManager, id)
                 }
             }
@@ -301,68 +303,53 @@ object WidgetUpdateHelper {
             val plansWord = if (isDe) "Termine" else "plans"
             views.setTextViewText(R.id.widget_selected_count_badge, "${dayAppointments.size} $plansWord")
 
-            if (dayAppointments.isEmpty()) {
-                val emptyMessage = if (isSelectedToday) {
-                    if (isDe) "Keine Termine heute ☕" else "No appointments today ☕"
-                } else {
-                    if (isDe) "Keine Termine an diesem Tag ☕" else "No appointments for this day ☕"
-                }
-                views.setTextViewText(R.id.widget_empty_state_text, emptyMessage)
-                views.setViewVisibility(R.id.widget_empty_state_text, View.VISIBLE)
-                views.setViewVisibility(R.id.widget_event_1_container, View.GONE)
-                views.setViewVisibility(R.id.widget_event_2_container, View.GONE)
-                views.setViewVisibility(R.id.widget_event_3_container, View.GONE)
+            // Empty state placeholder text & background
+            val emptyMessage = if (isSelectedToday) {
+                if (isDe) "Keine Termine heute ☕" else "No appointments today ☕"
             } else {
-                views.setViewVisibility(R.id.widget_empty_state_text, View.GONE)
-
-                // Event 1
-                val e1 = dayAppointments.getOrNull(0)
-                if (e1 != null) {
-                    views.setViewVisibility(R.id.widget_event_1_container, View.VISIBLE)
-                    views.setInt(R.id.widget_event_1_container, "setBackgroundResource", eventBg)
-                    views.setTextViewText(R.id.widget_event_1_badge, e1.ownerType.badge)
-                    views.setTextViewText(R.id.widget_event_1_time, formatEventTime(e1))
-                    views.setTextViewText(R.id.widget_event_1_title, e1.title)
-                    views.setTextColor(R.id.widget_event_1_title, primaryTextColor)
-                    views.setTextColor(R.id.widget_event_1_time, secondaryTextColor)
-                } else {
-                    views.setViewVisibility(R.id.widget_event_1_container, View.GONE)
-                }
-
-                // Event 2
-                val e2 = dayAppointments.getOrNull(1)
-                if (e2 != null) {
-                    views.setViewVisibility(R.id.widget_event_2_container, View.VISIBLE)
-                    views.setInt(R.id.widget_event_2_container, "setBackgroundResource", eventBg)
-                    views.setTextViewText(R.id.widget_event_2_badge, e2.ownerType.badge)
-                    views.setTextViewText(R.id.widget_event_2_time, formatEventTime(e2))
-                    views.setTextViewText(R.id.widget_event_2_title, e2.title)
-                    views.setTextColor(R.id.widget_event_2_title, primaryTextColor)
-                    views.setTextColor(R.id.widget_event_2_time, secondaryTextColor)
-                } else {
-                    views.setViewVisibility(R.id.widget_event_2_container, View.GONE)
-                }
-
-                // Event 3
-                val e3 = dayAppointments.getOrNull(2)
-                if (e3 != null) {
-                    views.setViewVisibility(R.id.widget_event_3_container, View.VISIBLE)
-                    views.setInt(R.id.widget_event_3_container, "setBackgroundResource", eventBg)
-                    views.setTextViewText(R.id.widget_event_3_badge, e3.ownerType.badge)
-                    views.setTextColor(R.id.widget_event_3_title, primaryTextColor)
-                    views.setTextColor(R.id.widget_event_3_time, secondaryTextColor)
-                    val remaining = dayAppointments.size - 2
-                    if (remaining > 1) {
-                        views.setTextViewText(R.id.widget_event_3_time, "+$remaining")
-                        views.setTextViewText(R.id.widget_event_3_title, "${e3.title} ${if (isDe) "& mehr..." else "& more..."}")
-                    } else {
-                        views.setTextViewText(R.id.widget_event_3_time, formatEventTime(e3))
-                        views.setTextViewText(R.id.widget_event_3_title, e3.title)
-                    }
-                } else {
-                    views.setViewVisibility(R.id.widget_event_3_container, View.GONE)
-                }
+                if (isDe) "Keine Termine an diesem Tag ☕" else "No appointments for this day ☕"
             }
+            views.setTextViewText(R.id.widget_empty_state_text, emptyMessage)
+            views.setInt(R.id.widget_empty_state_text, "setBackgroundResource", emptyStateBg)
+            views.setTextColor(R.id.widget_empty_state_text, emptyStateTextColor)
+
+            // Setup Dedicated Add Appointment button for the currently selected date
+            views.setTextViewText(R.id.widget_btn_add_selected_day, if (isDe) "＋ Termin" else "＋ Add")
+            views.setInt(R.id.widget_btn_add_selected_day, "setBackgroundResource", if (isWidgetDark) R.drawable.widget_button_bg_dark else R.drawable.widget_button_bg)
+
+            val addForSelectedDayIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("EXTRA_OPEN_ADD", true)
+                putExtra("EXTRA_DATE_MILLIS", selectedMillis)
+            }
+            val addForSelectedDayPendingIntent = PendingIntent.getActivity(
+                context,
+                appWidgetId * 1000 + 8,
+                addForSelectedDayIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            views.setOnClickPendingIntent(R.id.widget_btn_add_selected_day, addForSelectedDayPendingIntent)
+            views.setOnClickPendingIntent(R.id.widget_empty_state_text, addForSelectedDayPendingIntent)
+
+            // Bind Scrollable ListView via RemoteViewsService
+            val serviceIntent = Intent(context, WidgetAppointmentListService::class.java).apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+            }
+            views.setRemoteAdapter(R.id.widget_appointment_list, serviceIntent)
+            views.setEmptyView(R.id.widget_appointment_list, R.id.widget_empty_state_text)
+
+            // Template PendingIntent for ListView items: when clicked, launches MainActivity with item details
+            val listClickIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val listClickPendingIntent = PendingIntent.getActivity(
+                context,
+                appWidgetId * 1000 + 9,
+                listClickIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            )
+            views.setPendingIntentTemplate(R.id.widget_appointment_list, listClickPendingIntent)
 
             // 5. Pending Intents for Navigation & App Actions
             // Prev month button
@@ -395,18 +382,13 @@ object WidgetUpdateHelper {
                 PendingIntent.getBroadcast(context, appWidgetId * 10 + 3, todayIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             )
 
-            // Add Event button: Opens App to add appointment on the currently selected date
-            val addIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("EXTRA_OPEN_ADD", true)
-                putExtra("EXTRA_DATE_MILLIS", selectedMillis)
-            }
+            // Add Event button in header: Opens App to add appointment on the currently selected date
             views.setOnClickPendingIntent(
                 R.id.widget_btn_add,
-                PendingIntent.getActivity(context, appWidgetId * 10 + 4, addIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                PendingIntent.getActivity(context, appWidgetId * 10 + 4, addForSelectedDayIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             )
 
-            // Tapping appointment items, date label, or empty state launches the app
+            // Tapping date label launches the app on that selected date
             val openAppIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("EXTRA_DATE_MILLIS", selectedMillis)
@@ -418,19 +400,11 @@ object WidgetUpdateHelper {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             views.setOnClickPendingIntent(R.id.widget_selected_date_label, openAppPendingIntent)
-            views.setOnClickPendingIntent(R.id.widget_event_1_container, openAppPendingIntent)
-            views.setOnClickPendingIntent(R.id.widget_event_2_container, openAppPendingIntent)
-            views.setOnClickPendingIntent(R.id.widget_event_3_container, openAppPendingIntent)
-
-            // Tapping on empty state opens add screen on that selected day
-            views.setOnClickPendingIntent(
-                R.id.widget_empty_state_text,
-                PendingIntent.getActivity(context, appWidgetId * 10 + 6, addIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            )
 
             // Tapping month title opens the app to that month
             views.setOnClickPendingIntent(R.id.widget_month_title, openAppPendingIntent)
 
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widget_appointment_list)
             appWidgetManager.updateAppWidget(appWidgetId, views)
         } catch (e: Exception) {
             android.util.Log.e("WidgetUpdateHelper", "Error updating widget $appWidgetId: ${e.message}", e)

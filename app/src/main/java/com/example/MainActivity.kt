@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,6 +22,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleWidgetIntent(intent)
         enableEdgeToEdge()
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -36,6 +38,28 @@ class MainActivity : ComponentActivity() {
                     CalendarHomeScreen(viewModel = viewModel)
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    private fun handleWidgetIntent(intent: Intent?) {
+        if (intent == null) return
+        val dateMillis = intent.getLongExtra("EXTRA_DATE_MILLIS", -1L)
+        val shouldOpenAdd = intent.getBooleanExtra("EXTRA_OPEN_ADD", false)
+        val appointmentId = intent.getStringExtra("EXTRA_APPOINTMENT_ID")
+
+        if (dateMillis > 0) {
+            viewModel.selectDate(dateMillis)
+        }
+        if (!appointmentId.isNullOrBlank()) {
+            viewModel.openAppointmentById(appointmentId)
+        } else if (shouldOpenAdd) {
+            viewModel.openAddDialog(if (dateMillis > 0) dateMillis else null)
         }
     }
 }
