@@ -1,6 +1,8 @@
 package com.example.ui.viewmodel
 
+import android.app.Activity
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
@@ -12,6 +14,9 @@ import com.example.data.model.Note
 import com.example.data.model.NoteCategory
 import com.example.data.model.OwnerType
 import com.example.data.model.SyncState
+import com.example.data.remote.GoogleDriveBackupPayload
+import com.example.data.remote.GoogleDriveFileMetadata
+import com.example.data.remote.GoogleDriveSyncService
 import com.example.data.repository.AppointmentRepository
 import com.example.data.repository.NoteRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -591,6 +596,164 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
 
     fun disconnectGoogleAccount() {
         couplePreferences.disconnectGoogleAccount()
+    }
+
+    private val googleDriveService = GoogleDriveSyncService(getApplication())
+    private val _isDriveSyncing = MutableStateFlow(false)
+    val isDriveSyncing: StateFlow<Boolean> = _isDriveSyncing.asStateFlow()
+
+    private val _driveStatusMessage = MutableStateFlow<String?>(null)
+    val driveStatusMessage: StateFlow<String?> = _driveStatusMessage.asStateFlow()
+
+    fun clearDriveStatusMessage() {
+        _driveStatusMessage.value = null
+    }
+
+    fun backupToGoogleDrive(activity: Activity? = null, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            _isDriveSyncing.value = true
+            try {
+                val profile = couplePreferences.coupleProfile.value
+                val email = profile.googleAccountEmail ?: ""
+                val appointments = repository.getAllAppointmentsForBackup()
+                val notes = noteRepository.getAllNotesForBackup()
+                val appCats = couplePreferences.appointmentCategories.value
+                val noteCats = couplePreferences.noteCategories.value
+                val payload = googleDriveService.buildPayload(profile, appointments, notes, appCats, noteCats)
+
+                val token = googleDriveService.getDriveAuthToken(email, activity)
+                if (token != null) {
+                    val result = googleDriveService.uploadToGoogleDrive(token, payload)
+                    if (result.isSuccess) {
+                        couplePreferences.setLastDriveSyncMillis(System.currentTimeMillis())
+                        val msg = "TwoGether_Calendar_Backup.json in Google Drive gesichert (${appointments.size} Termine, ${notes.size} Notizen)"
+                        _driveStatusMessage.value = msg
+                        _newCreatedAlert.value = msg
+                        onResult(true, msg)
+                    } else {
+                        val err = result.exceptionOrNull()?.message ?: "Drive Upload fehlgeschlagen"
+                        _driveStatusMessage.value = err
+                        onResult(false, err)
+                    }
+                } else {
+                    val msg = "Direktes Google Drive Token benötigt Konto-Freigabe oder SAF-Export"
+                    _driveStatusMessage.value = msg
+                    onResult(false, msg)
+                }
+            } catch (e: Exception) {
+                val err = e.message ?: "Unbekannter Fehler"
+                _driveStatusMessage.value = err
+                onResult(false, err)
+            } finally {
+                _isDriveSyncing.value = false
+            }
+        }
+    }
+
+    fun restoreFromGoogleDrive(activity: Activity? = null, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            _isDriveSyncing.value = true
+            try {
+                val profile = couplePreferences.coupleProfile.value
+                val email = profile.googleAccountEmail ?: ""
+                val token = googleDriveService.getDriveAuthToken(email, activity)
+                if (token != null) {
+                    val result = googleDriveService.downloadFromGoogleDrive(token)
+                    if (result.isSuccess) {
+                        val payload = result.getOrNull()!!
+                        applyRestoredDrivePayload(payload)
+                        val msg = "${payload.appointments.size} Termine & ${payload.notes.size} Notizen aus Google Drive geladen!"
+                        _driveStatusMessage.value = msg
+                        _newCreatedAlert.value = msg
+                        onResult(true, msg)
+                    } else {
+                        val err = result.exceptionOrNull()?.message ?: "Wiederherstellung fehlgeschlagen"
+                        _driveStatusMessage.value = err
+                        onResult(false, err)
+                    }
+                } else {
+                    onResult(false, "Kein Google Drive Token verfügbar")
+                }
+            } catch (e: Exception) {
+                val err = e.message ?: "Wiederherstellungsfehler"
+                _driveStatusMessage.value = err
+                onResult(false, err)
+            } finally {
+                _isDriveSyncing.value = false
+            }
+        }
+    }
+
+    fun exportToGoogleDriveSaf(uri: Uri, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            _isDriveSyncing.value = true
+            try {
+                val profile = couplePreferences.coupleProfile.value
+                val appointments = repository.getAllAppointmentsForBackup()
+                val notes = noteRepository.getAllNotesForBackup()
+                val appCats = couplePreferences.appointmentCategories.value
+                val noteCats = couplePreferences.noteCategories.value
+                val payload = googleDriveService.buildPayload(profile, appointments, notes, appCats, noteCats)
+                val res = googleDriveService.exportToSafUri(uri, payload)
+                if (res.isSuccess) {
+                    couplePreferences.setLastDriveSyncMillis(System.currentTimeMillis())
+                    val msg = "Backup-Datei erfolgreich in Google Drive / Speicher abgelegt!"
+                    _driveStatusMessage.value = msg
+                    _newCreatedAlert.value = msg
+                    onResult(true, msg)
+                } else {
+                    val err = res.exceptionOrNull()?.message ?: "Export fehlgeschlagen"
+                    onResult(false, err)
+                }
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "Export-Fehler")
+            } finally {
+                _isDriveSyncing.value = false
+            }
+        }
+    }
+
+    fun importFromGoogleDriveSaf(uri: Uri, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            _isDriveSyncing.value = true
+            try {
+                val res = googleDriveService.importFromSafUri(uri)
+                if (res.isSuccess) {
+                    val payload = res.getOrNull()!!
+                    applyRestoredDrivePayload(payload)
+                    val msg = "${payload.appointments.size} Termine & ${payload.notes.size} Notizen importiert!"
+                    _driveStatusMessage.value = msg
+                    _newCreatedAlert.value = msg
+                    onResult(true, msg)
+                } else {
+                    val err = res.exceptionOrNull()?.message ?: "Import fehlgeschlagen"
+                    onResult(false, err)
+                }
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "Import-Fehler")
+            } finally {
+                _isDriveSyncing.value = false
+            }
+        }
+    }
+
+    private suspend fun applyRestoredDrivePayload(payload: GoogleDriveBackupPayload) {
+        val appCats = payload.appointmentCategories.map { it.toDomain() }
+        if (appCats.isNotEmpty()) {
+            couplePreferences.mergeRemoteAppointmentCategories(appCats)
+        }
+        val noteCats = payload.noteCategories.map { it.toDomain() }
+        if (noteCats.isNotEmpty()) {
+            couplePreferences.mergeRemoteNoteCategories(noteCats)
+        }
+        val appointments = payload.appointments.map { it.toDomain() }
+        repository.restoreAppointmentsFromList(appointments)
+
+        val notes = payload.notes.map { it.toDomain() }
+        noteRepository.restoreNotesFromList(notes)
+
+        couplePreferences.setLastDriveSyncMillis(System.currentTimeMillis())
+        syncWithPartner()
     }
 
     fun restoreFromGoogleCloud() {

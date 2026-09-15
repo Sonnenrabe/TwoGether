@@ -90,6 +90,8 @@ fun CalendarHomeScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isDriveSyncing by viewModel.isDriveSyncing.collectAsStateWithLifecycle()
+    val driveStatusMessage by viewModel.driveStatusMessage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val lang = uiState.coupleProfile.appLanguage
 
@@ -551,6 +553,13 @@ fun CalendarHomeScreen(
             onRestoreGoogleCloud = {
                 viewModel.restoreFromGoogleCloud()
             },
+            isDriveSyncing = isDriveSyncing,
+            driveStatusMessage = driveStatusMessage,
+            onBackupToGoogleDrive = { viewModel.backupToGoogleDrive() },
+            onRestoreFromGoogleDrive = { viewModel.restoreFromGoogleDrive() },
+            onExportToGoogleDriveSaf = { uri -> viewModel.exportToGoogleDriveSaf(uri) },
+            onImportFromGoogleDriveSaf = { uri -> viewModel.importFromGoogleDriveSaf(uri) },
+            onClearDriveStatus = { viewModel.clearDriveStatusMessage() },
             onUnlinkPartner = { keepOwnEvents ->
                 viewModel.unlinkPartner(keepOwnEvents)
             },

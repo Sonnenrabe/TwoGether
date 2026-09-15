@@ -233,4 +233,18 @@ class NoteRepository(
             Log.e("NoteRepo", "Failed to share note: ${e.message}")
         }
     }
+
+    suspend fun getAllNotesForBackup(): List<Note> = withContext(Dispatchers.IO) {
+        noteDao.getAllForSync().map { it.toDomain() }
+    }
+
+    suspend fun restoreNotesFromList(notes: List<Note>): Int = withContext(Dispatchers.IO) {
+        val entities = notes.map { NoteEntity.fromDomain(it) }
+        var count = 0
+        entities.forEach {
+            noteDao.insertOrUpdate(it)
+            count++
+        }
+        count
+    }
 }

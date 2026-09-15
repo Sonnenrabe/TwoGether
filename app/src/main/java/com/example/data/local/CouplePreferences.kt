@@ -156,15 +156,44 @@ class CouplePreferences(context: Context) {
         )
     }
 
+    fun getCloudSyncObjectId(): String? {
+        return prefs.getString("cloud_sync_object_id", null)
+    }
+
+    fun setCloudSyncObjectId(id: String?) {
+        val editor = prefs.edit()
+        if (id != null && id.isNotBlank()) {
+            editor.putString("cloud_sync_object_id", id.trim())
+        } else {
+            editor.remove("cloud_sync_object_id")
+        }
+        editor.apply()
+    }
+
+    fun getLastDriveSyncMillis(): Long {
+        return prefs.getLong("last_drive_sync_millis", 0L)
+    }
+
+    fun setLastDriveSyncMillis(millis: Long) {
+        prefs.edit().putLong("last_drive_sync_millis", millis).apply()
+    }
+
     fun joinCoupleCode(code: String, partnerName: String = "Partner") {
+        val trimmed = code.trim()
+        val parts = trimmed.split("#")
+        val cleanCode = parts[0].uppercase().trim()
+        if (parts.size > 1 && parts[1].isNotBlank()) {
+            setCloudSyncObjectId(parts[1].trim())
+        }
         updateProfile(
-            coupleCode = code.uppercase().trim(),
+            coupleCode = cleanCode,
             partnerName = partnerName,
             isPaired = true
         )
     }
 
     fun disconnectPairing() {
+        setCloudSyncObjectId(null)
         val newCode = generateCoupleCode()
         updateProfile(
             coupleCode = newCode,

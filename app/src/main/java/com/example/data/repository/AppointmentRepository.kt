@@ -305,4 +305,17 @@ class AppointmentRepository(
         WidgetUpdateHelper.updateAllWidgets(context)
         newAppt
     }
+
+    suspend fun getAllAppointmentsForBackup(): List<Appointment> = withContext(Dispatchers.IO) {
+        appointmentDao.getAllForSync().map { it.toDomain() }
+    }
+
+    suspend fun restoreAppointmentsFromList(appointments: List<Appointment>): Int = withContext(Dispatchers.IO) {
+        val entities = appointments.map { AppointmentEntity.fromDomain(it) }
+        if (entities.isNotEmpty()) {
+            appointmentDao.insertAll(entities)
+            WidgetUpdateHelper.updateAllWidgets(context)
+        }
+        entities.size
+    }
 }

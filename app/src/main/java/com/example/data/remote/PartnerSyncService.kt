@@ -281,8 +281,166 @@ class PartnerSyncService {
     // In-memory cloud simulation relay for instantaneous local & mesh sync fallback
     companion object {
         private const val CLOUD_PEPPER = "TwoGether_E2EE_Cloud_Salt_2026!#"
+        private const val GLOBAL_REGISTRY_OBJECT_ID = "ff808181a09d98f701a0a64189931344"
         private val cloudRelayMemory = java.util.concurrent.ConcurrentHashMap<String, RemoteSyncEnvelope>()
         private val googleAccountCloudBackups = java.util.concurrent.ConcurrentHashMap<String, GoogleCloudBackupEnvelope>()
+        private val coupleSyncObjectIdMap = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        fun setKnownSyncObjectId(coupleCode: String, objectId: String) {
+            if (coupleCode.isNotBlank() && objectId.isNotBlank()) {
+                coupleSyncObjectIdMap[coupleCode.uppercase().trim()] = objectId.trim()
+            }
+        }
+    }
+
+    /**
+     * Updates the persistent cloud storage with the encrypted envelope.
+     * Accessible by the partner even if this device is switched off or runs out of battery.
+     */
+    private suspend fun pushToPersistentCloud(coupleCode: String, envelope: RemoteSyncEnvelope) = withContext(Dispatchers.IO) {
+        try {
+            val cleanCode = coupleCode.uppercase().trim()
+            var objectId = coupleSyncObjectIdMap[cleanCode]
+
+            val dataObj = org.json.JSONObject().apply {
+                put("coupleCode", cleanCode)
+                put("lastUpdated", envelope.lastUpdated)
+                put("isEncrypted", envelope.isEncrypted)
+                put("algorithm", envelope.algorithm)
+                put("salt", envelope.salt)
+                put("iv", envelope.iv)
+                put("ciphertext", envelope.ciphertext)
+            }
+
+            val payload = org.json.JSONObject().apply {
+                put("name", "TwoGether_$cleanCode")
+                put("data", dataObj)
+            }
+
+            val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            if (objectId != null) {
+                val putUrl = "https://api.restful-api.dev/objects/$objectId"
+                val request = Request.Builder().url(putUrl).put(body).build()
+                client.newCall(request).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        Log.d("PartnerSync", "Persistent cloud updated successfully for $cleanCode (id: $objectId)")
+                        return@withContext
+                    } else if (resp.code == 404) {
+                        objectId = null
+                    }
+                }
+            }
+
+            // Create new persistent object if not existing or expired
+            val postUrl = "https://api.restful-api.dev/objects"
+            val request = Request.Builder().url(postUrl).post(body).build()
+            client.newCall(request).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val respBody = resp.body?.string() ?: ""
+                    val newId = org.json.JSONObject(respBody).optString("id")
+                    if (newId.isNotBlank()) {
+                        coupleSyncObjectIdMap[cleanCode] = newId
+                        Log.d("PartnerSync", "Created persistent cloud object for $cleanCode: $newId")
+                        registerInGlobalRegistry(cleanCode, newId)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("PartnerSync", "Persistent cloud push error: ${e.message}")
+        }
+    }
+
+    /**
+     * Registers the coupleCode -> objectId mapping in the shared cloud registry.
+     */
+    private suspend fun registerInGlobalRegistry(coupleCode: String, objectId: String) = withContext(Dispatchers.IO) {
+        try {
+            val getUrl = "https://api.restful-api.dev/objects/$GLOBAL_REGISTRY_OBJECT_ID"
+            val getReq = Request.Builder().url(getUrl).get().build()
+            val existingData = org.json.JSONObject()
+            client.newCall(getReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: ""
+                    val root = org.json.JSONObject(body)
+                    val data = root.optJSONObject("data")
+                    if (data != null) {
+                        val keys = data.keys()
+                        while (keys.hasNext()) {
+                            val k = keys.next()
+                            existingData.put(k, data.optString(k))
+                        }
+                    }
+                }
+            }
+            existingData.put(coupleCode, objectId)
+            val putPayload = org.json.JSONObject().apply {
+                put("name", "twogether_global_registry_v1")
+                put("data", existingData)
+            }
+            val body = putPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val putReq = Request.Builder().url(getUrl).put(body).build()
+            client.newCall(putReq).execute().use { _ -> }
+        } catch (e: Exception) {
+            Log.w("PartnerSync", "Failed to update global registry: ${e.message}")
+        }
+    }
+
+    /**
+     * Pulls the encrypted envelope from persistent cloud storage.
+     * Succeeds even if the partner's phone is currently dead or offline.
+     */
+    private suspend fun pullFromPersistentCloud(coupleCode: String): RemoteSyncEnvelope? = withContext(Dispatchers.IO) {
+        try {
+            val cleanCode = coupleCode.uppercase().trim()
+            var objectId = coupleSyncObjectIdMap[cleanCode]
+
+            if (objectId == null) {
+                val getUrl = "https://api.restful-api.dev/objects/$GLOBAL_REGISTRY_OBJECT_ID"
+                val getReq = Request.Builder().url(getUrl).get().build()
+                client.newCall(getReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: ""
+                        val root = org.json.JSONObject(body)
+                        val data = root.optJSONObject("data")
+                        if (data != null && data.has(cleanCode)) {
+                            objectId = data.optString(cleanCode)
+                            if (!objectId.isNullOrBlank()) {
+                                coupleSyncObjectIdMap[cleanCode] = objectId!!
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (objectId != null) {
+                val fetchUrl = "https://api.restful-api.dev/objects/$objectId"
+                val fetchReq = Request.Builder().url(fetchUrl).get().build()
+                client.newCall(fetchReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: ""
+                        val root = org.json.JSONObject(body)
+                        val data = root.optJSONObject("data")
+                        if (data != null) {
+                            val envelope = RemoteSyncEnvelope(
+                                coupleCode = cleanCode,
+                                lastUpdated = data.optLong("lastUpdated", System.currentTimeMillis()),
+                                isEncrypted = data.optBoolean("isEncrypted", true),
+                                algorithm = data.optString("algorithm", "AES-256-GCM"),
+                                salt = data.optString("salt", ""),
+                                iv = data.optString("iv", ""),
+                                ciphertext = data.optString("ciphertext", "")
+                            )
+                            cloudRelayMemory[cleanCode] = envelope
+                            return@withContext envelope
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("PartnerSync", "Persistent cloud pull notice: ${e.message}")
+        }
+        return@withContext null
     }
 
     /**
@@ -517,23 +675,8 @@ class PartnerSyncService {
             val encryptedEnvelope = encryptSyncContent(mergedContent, coupleCode)
             cloudRelayMemory[coupleCode] = encryptedEnvelope
 
-            // Attempt cloud push via public KV relay with only encrypted ciphertext
-            try {
-                val json = envelopeAdapter.toJson(encryptedEnvelope)
-                val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
-                val sanitizedCode = coupleCode.replace("[^A-Za-z0-9_-]".toRegex(), "")
-                val url = "https://api.restful-api.dev/objects"
-                
-                val request = Request.Builder()
-                    .url(url)
-                    .post(body)
-                    .build()
-                client.newCall(request).execute().use { response ->
-                    Log.d("PartnerSync", "Pushed encrypted E2EE payload for $sanitizedCode, response: ${response.code}")
-                }
-            } catch (e: Exception) {
-                Log.w("PartnerSync", "Network relay upload notice (cached locally in memory): ${e.message}")
-            }
+            // Persistently store encrypted payload in the cloud
+            pushToPersistentCloud(coupleCode, encryptedEnvelope)
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -595,17 +738,8 @@ class PartnerSyncService {
             val encryptedEnvelope = encryptSyncContent(mergedContent, coupleCode)
             cloudRelayMemory[coupleCode] = encryptedEnvelope
 
-            try {
-                val json = envelopeAdapter.toJson(encryptedEnvelope)
-                val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
-                val request = Request.Builder()
-                    .url("https://api.restful-api.dev/objects")
-                    .post(body)
-                    .build()
-                client.newCall(request).execute().use { _ -> }
-            } catch (e: Exception) {
-                Log.w("PartnerSync", "Encrypted note sync cached in cloud relay: ${e.message}")
-            }
+            // Persistently store encrypted payload in the cloud
+            pushToPersistentCloud(coupleCode, encryptedEnvelope)
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -625,9 +759,10 @@ class PartnerSyncService {
         }
 
         try {
-            val memoryEnvelope = cloudRelayMemory[coupleCode]
-            if (memoryEnvelope != null) {
-                val content = decryptSyncEnvelope(memoryEnvelope, coupleCode)
+            // First attempt to pull from persistent cloud storage (works even if partner's phone is off)
+            val remoteEnvelope = pullFromPersistentCloud(coupleCode) ?: cloudRelayMemory[coupleCode]
+            if (remoteEnvelope != null) {
+                val content = decryptSyncEnvelope(remoteEnvelope, coupleCode)
                 val notes = content.notes.map { it.toDomain() }
                 val categories = content.noteCategories.map { it.toDomain() }
                 return@withContext Result.success(Pair(notes, categories))
@@ -659,9 +794,10 @@ class PartnerSyncService {
         }
 
         try {
-            val memoryEnvelope = cloudRelayMemory[coupleCode]
-            if (memoryEnvelope != null) {
-                val content = decryptSyncEnvelope(memoryEnvelope, coupleCode)
+            // First attempt to pull from persistent cloud storage (works even if partner's phone is off)
+            val remoteEnvelope = pullFromPersistentCloud(coupleCode) ?: cloudRelayMemory[coupleCode]
+            if (remoteEnvelope != null) {
+                val content = decryptSyncEnvelope(remoteEnvelope, coupleCode)
                 val appointments = content.appointments.map { it.toDomain() }
                 val categories = content.appointmentCategories.map { it.toDomain() }
                 return@withContext Result.success(Pair(appointments, categories))

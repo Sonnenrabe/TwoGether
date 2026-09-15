@@ -51,12 +51,35 @@ fun PartnerPairingDialog(
     onLinkGoogleAccount: (email: String, name: String) -> Unit = { _, _ -> },
     onDisconnectGoogleAccount: () -> Unit = {},
     onRestoreGoogleCloud: () -> Unit = {},
+    isDriveSyncing: Boolean = false,
+    driveStatusMessage: String? = null,
+    onBackupToGoogleDrive: () -> Unit = {},
+    onRestoreFromGoogleDrive: () -> Unit = {},
+    onExportToGoogleDriveSaf: (Uri) -> Unit = {},
+    onImportFromGoogleDriveSaf: (Uri) -> Unit = {},
+    onClearDriveStatus: () -> Unit = {},
     onUnlinkPartner: (keepOwnEvents: Boolean) -> Unit = {},
     onSimulatePartnerPlan: () -> Unit,
     onDisconnect: () -> Unit
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    val createDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onExportToGoogleDriveSaf(uri)
+        }
+    }
+
+    val openDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onImportFromGoogleDriveSaf(uri)
+        }
+    }
 
     var myName by remember { mutableStateOf(profile.myName) }
     var partnerName by remember { mutableStateOf(profile.partnerName) }
@@ -1069,6 +1092,205 @@ fun PartnerPairingDialog(
                                             Text(
                                                 text = if (isDe) "Anmelde-Optionen & Browser-Login" else "Sign-in options & Browser login",
                                                 fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(18.dp))
+
+                            // Google Drive Direct Backup & SAF File Management Card
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                border = androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth().testTag("card_google_drive_backup")
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.CloudSync,
+                                                contentDescription = "Google Drive",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = if (isDe) "Google Drive Backup" else "Google Drive Backup",
+                                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                            Text(
+                                                text = if (isDe) "twogether_couple_backup.json" else "twogether_couple_backup.json",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = if (isDe)
+                                            "Sichere deine gemeinsamen Termine & Kategorien direkt als Datei in Google Drive. Du kannst die Datei in deinem Google Drive sehen, verwalten und auf jedem Gerät wiederherstellen."
+                                        else
+                                            "Backup your shared appointments & categories directly to Google Drive. You can see the file in your Google Drive, manage it, and restore it anytime.",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.5.sp,
+                                            lineHeight = 16.sp
+                                        )
+                                    )
+
+                                    if (isDriveSyncing) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Text(
+                                                text = if (isDe) "Google Drive Synchronisation läuft..." else "Syncing with Google Drive...",
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    if (!driveStatusMessage.isNullOrBlank()) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Info,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = driveStatusMessage,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                        fontSize = 11.sp
+                                                    ),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(
+                                                    onClick = onClearDriveStatus,
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Close,
+                                                        contentDescription = "Schließen",
+                                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // Direct Google Drive App Sync Buttons
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = onBackupToGoogleDrive,
+                                            enabled = !isDriveSyncing,
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(1f).testTag("btn_drive_backup")
+                                        ) {
+                                            Icon(imageVector = Icons.Filled.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (isDe) "In Drive sichern" else "Backup to Drive",
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        FilledTonalButton(
+                                            onClick = onRestoreFromGoogleDrive,
+                                            enabled = !isDriveSyncing,
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(1f).testTag("btn_drive_restore")
+                                        ) {
+                                            Icon(imageVector = Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (isDe) "Aus Drive laden" else "Restore Drive",
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    // SAF File System & Google Drive App Pickers
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                createDocLauncher.launch("twogether_couple_backup.json")
+                                            },
+                                            enabled = !isDriveSyncing,
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(1f).testTag("btn_saf_export")
+                                        ) {
+                                            Icon(imageVector = Icons.Filled.SaveAs, contentDescription = null, modifier = Modifier.size(15.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = if (isDe) "Speichern unter…" else "Save file as…",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                openDocLauncher.launch(arrayOf("application/json", "*/*"))
+                                            },
+                                            enabled = !isDriveSyncing,
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(1f).testTag("btn_saf_import")
+                                        ) {
+                                            Icon(imageVector = Icons.Filled.FileOpen, contentDescription = null, modifier = Modifier.size(15.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = if (isDe) "Datei öffnen…" else "Open file…",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
                                             )
                                         }
                                     }
