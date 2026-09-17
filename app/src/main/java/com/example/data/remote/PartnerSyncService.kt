@@ -281,13 +281,10 @@ class PartnerSyncService {
     // In-memory cloud simulation relay for instantaneous local & mesh sync fallback
     companion object {
         private const val CLOUD_PEPPER = "TwoGether_E2EE_Cloud_Salt_2026!#"
+        private const val FIREBASE_PROJECT_ID = "gen-lang-client-0622623599"
+        private const val FIREBASE_API_KEY = "AIzaSyCBs-zb48mpc5mC-GlQ7ZL2DHW1vKV5A1o"
+        private const val FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1/projects/$FIREBASE_PROJECT_ID/databases/(default)/documents"
         private const val GLOBAL_REGISTRY_OBJECT_ID = "ff808181a09d98f701a0a64189931344"
-        /**
-         * Maximum number of couple codes maintained in the shared cloud registry.
-         * When this capacity limit is reached, the oldest inactive codes and their
-         * remote objects are automatically deleted (FIFO / LRU cache eviction).
-         */
-        const val MAX_REGISTRY_ENTRIES = 500
         private val cloudRelayMemory = java.util.concurrent.ConcurrentHashMap<String, RemoteSyncEnvelope>()
         private val googleAccountCloudBackups = java.util.concurrent.ConcurrentHashMap<String, GoogleCloudBackupEnvelope>()
         private val coupleSyncObjectIdMap = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -322,11 +319,28 @@ class PartnerSyncService {
     }
 
     /**
-     * Checks if a couple code is available in the global registry (not already claimed).
+     * Checks if a couple code is available in Firebase Firestore and global registry.
      */
     suspend fun isCoupleCodeAvailable(coupleCode: String): Boolean = withContext(Dispatchers.IO) {
         val cleanCode = coupleCode.uppercase().trim()
         if (cleanCode.isBlank()) return@withContext false
+
+        try {
+            // First check Firebase Firestore
+            val firestoreUrl = "$FIRESTORE_BASE_URL/couple_sync/$cleanCode?key=$FIREBASE_API_KEY"
+            val req = Request.Builder().url(firestoreUrl).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.code == 404) {
+                    // Not taken in Firestore!
+                    return@withContext true
+                } else if (resp.isSuccessful) {
+                    // Document exists in Firestore!
+                    return@withContext false
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("PartnerSync", "Firestore availability check fallback: ${e.message}")
+        }
 
         try {
             val getUrl = "https://api.restful-api.dev/objects/$GLOBAL_REGISTRY_OBJECT_ID"
@@ -366,12 +380,46 @@ class PartnerSyncService {
     }
 
     /**
-     * Updates the persistent cloud storage with the encrypted envelope.
+     * Updates the persistent cloud storage (Firebase Firestore) with the encrypted envelope.
      * Accessible by the partner even if this device is switched off or runs out of battery.
      */
     private suspend fun pushToPersistentCloud(coupleCode: String, envelope: RemoteSyncEnvelope) = withContext(Dispatchers.IO) {
+        val cleanCode = coupleCode.uppercase().trim()
+        val now = System.currentTimeMillis()
+
+        // 1. Primary: Direct Firebase Firestore persistence
         try {
-            val cleanCode = coupleCode.uppercase().trim()
+            val firestoreUrl = "$FIRESTORE_BASE_URL/couple_sync/$cleanCode?key=$FIREBASE_API_KEY"
+            val fields = org.json.JSONObject().apply {
+                put("coupleCode", org.json.JSONObject().put("stringValue", cleanCode))
+                put("lastUpdated", org.json.JSONObject().put("integerValue", envelope.lastUpdated.toString()))
+                put("isEncrypted", org.json.JSONObject().put("booleanValue", envelope.isEncrypted))
+                put("algorithm", org.json.JSONObject().put("stringValue", envelope.algorithm))
+                put("salt", org.json.JSONObject().put("stringValue", envelope.salt))
+                put("iv", org.json.JSONObject().put("stringValue", envelope.iv))
+                put("ciphertext", org.json.JSONObject().put("stringValue", envelope.ciphertext))
+                put("lastActiveMillis", org.json.JSONObject().put("integerValue", now.toString()))
+            }
+            val payload = org.json.JSONObject().apply {
+                put("fields", fields)
+            }
+            val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val patchReq = Request.Builder().url(firestoreUrl).patch(body).build()
+            client.newCall(patchReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    Log.d("PartnerSync", "Firebase Firestore persistent sync updated for $cleanCode")
+                    cloudRelayMemory[cleanCode] = envelope
+                    return@withContext
+                } else {
+                    Log.w("PartnerSync", "Firestore push returned ${resp.code}: ${resp.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("PartnerSync", "Firebase Firestore push error, using fallback: ${e.message}")
+        }
+
+        // 2. Secondary fallback: Restful object store
+        try {
             var objectId = coupleSyncObjectIdMap[cleanCode]
 
             val dataObj = org.json.JSONObject().apply {
@@ -426,8 +474,7 @@ class PartnerSyncService {
 
     /**
      * Registers the coupleCode -> objectId mapping in the shared cloud registry.
-     * If the registry capacity is exceeded, automatically evicts the oldest inactive codes
-     * and deletes their remote objects from cloud storage (FIFO / LRU cache eviction).
+     * All registered couples are stored permanently without artificial capacity caps.
      */
     private suspend fun registerInGlobalRegistry(coupleCode: String, objectId: String) = withContext(Dispatchers.IO) {
         try {
@@ -457,37 +504,7 @@ class PartnerSyncService {
             // Insert / update current couple code with current active timestamp
             existingRecords[coupleCode] = RegistryRecord(coupleCode, objectId, now)
 
-            // CAPACITY CHECK: If code base is full, delete the oldest inactive codes
-            if (existingRecords.size > MAX_REGISTRY_ENTRIES) {
-                // Sort by lastActiveMillis ascending (oldest first)
-                val sorted = existingRecords.values.sortedBy { it.lastActiveMillis }
-                val toRemoveCount = existingRecords.size - MAX_REGISTRY_ENTRIES
-                val staleRecords = sorted.take(toRemoveCount)
-
-                for (stale in staleRecords) {
-                    if (stale.code == coupleCode) continue
-
-                    existingRecords.remove(stale.code)
-                    coupleSyncObjectIdMap.remove(stale.code)
-                    cloudRelayMemory.remove(stale.code)
-                    Log.i("PartnerSync", "Pruning oldest code from cloud: ${stale.code} (lastActive: ${stale.lastActiveMillis})")
-
-                    // Delete the obsolete cloud object
-                    if (stale.objectId.isNotBlank() && stale.objectId != GLOBAL_REGISTRY_OBJECT_ID) {
-                        try {
-                            val delUrl = "https://api.restful-api.dev/objects/${stale.objectId}"
-                            val delReq = Request.Builder().url(delUrl).delete().build()
-                            client.newCall(delReq).execute().use { delResp ->
-                                Log.d("PartnerSync", "Deleted pruned cloud object ${stale.objectId}: ${delResp.code}")
-                            }
-                        } catch (e: Exception) {
-                            Log.w("PartnerSync", "Failed to delete stale object ${stale.objectId}: ${e.message}")
-                        }
-                    }
-                }
-            }
-
-            // Save back updated registry
+            // Save back updated registry with all couples permanently maintained
             val newJsonData = org.json.JSONObject()
             for ((code, record) in existingRecords) {
                 newJsonData.put(code, "${record.objectId}|${record.lastActiveMillis}")
@@ -500,7 +517,7 @@ class PartnerSyncService {
             val body = putPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
             val putReq = Request.Builder().url(getUrl).put(body).build()
             client.newCall(putReq).execute().use { resp ->
-                Log.d("PartnerSync", "Global registry updated (${existingRecords.size}/$MAX_REGISTRY_ENTRIES codes registered). Response: ${resp.code}")
+                Log.d("PartnerSync", "Global registry updated (${existingRecords.size} couples registered). Response: ${resp.code}")
             }
         } catch (e: Exception) {
             Log.w("PartnerSync", "Failed to update global registry: ${e.message}")
@@ -508,12 +525,43 @@ class PartnerSyncService {
     }
 
     /**
-     * Pulls the encrypted envelope from persistent cloud storage.
+     * Pulls the encrypted envelope from persistent cloud storage (Firebase Firestore).
      * Succeeds even if the partner's phone is currently dead or offline.
      */
     private suspend fun pullFromPersistentCloud(coupleCode: String): RemoteSyncEnvelope? = withContext(Dispatchers.IO) {
+        val cleanCode = coupleCode.uppercase().trim()
+
+        // 1. Primary: Direct Firebase Firestore pull
         try {
-            val cleanCode = coupleCode.uppercase().trim()
+            val firestoreUrl = "$FIRESTORE_BASE_URL/couple_sync/$cleanCode?key=$FIREBASE_API_KEY"
+            val req = Request.Builder().url(firestoreUrl).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val bodyStr = resp.body?.string() ?: ""
+                    val root = org.json.JSONObject(bodyStr)
+                    val fields = root.optJSONObject("fields")
+                    if (fields != null) {
+                        val envelope = RemoteSyncEnvelope(
+                            coupleCode = cleanCode,
+                            lastUpdated = fields.optJSONObject("lastUpdated")?.optString("integerValue")?.toLongOrNull() ?: System.currentTimeMillis(),
+                            isEncrypted = fields.optJSONObject("isEncrypted")?.optBoolean("booleanValue") ?: true,
+                            algorithm = fields.optJSONObject("algorithm")?.optString("stringValue") ?: "AES-256-GCM",
+                            salt = fields.optJSONObject("salt")?.optString("stringValue") ?: "",
+                            iv = fields.optJSONObject("iv")?.optString("stringValue") ?: "",
+                            ciphertext = fields.optJSONObject("ciphertext")?.optString("stringValue") ?: ""
+                        )
+                        cloudRelayMemory[cleanCode] = envelope
+                        Log.d("PartnerSync", "Fetched encrypted envelope from Firebase Firestore for $cleanCode")
+                        return@withContext envelope
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("PartnerSync", "Firestore pull notice: ${e.message}")
+        }
+
+        // 2. Secondary fallback: Restful object store
+        try {
             var objectId = coupleSyncObjectIdMap[cleanCode]
 
             if (objectId == null) {

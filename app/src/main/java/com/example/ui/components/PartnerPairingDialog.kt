@@ -761,7 +761,7 @@ fun PartnerPairingDialog(
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = if (isDe) "60 Mio.+ Kombinationen • Auto-Cloud-Bereinigung" else "60M+ Combinations • Auto Cloud Pruning",
+                                            text = if (isDe) "60 Mio.+ Kombinationen • Dauerhafte Firebase Cloud-Sync" else "60M+ Combinations • Permanent Firebase Cloud Sync",
                                             style = MaterialTheme.typography.labelSmall.copy(
                                                 fontSize = 10.sp,
                                                 color = MaterialTheme.colorScheme.primary,
