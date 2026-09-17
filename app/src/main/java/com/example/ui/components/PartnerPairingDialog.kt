@@ -58,6 +58,7 @@ fun PartnerPairingDialog(
     onExportToGoogleDriveSaf: (Uri) -> Unit = {},
     onImportFromGoogleDriveSaf: (Uri) -> Unit = {},
     onClearDriveStatus: () -> Unit = {},
+    onRegenerateCode: () -> Unit = {},
     onUnlinkPartner: (keepOwnEvents: Boolean) -> Unit = {},
     onSimulatePartnerPlan: () -> Unit,
     onDisconnect: () -> Unit
@@ -696,7 +697,10 @@ fun PartnerPairingDialog(
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
                                         // Copy Code Button
                                         FilledTonalButton(
                                             onClick = {
@@ -706,11 +710,11 @@ fun PartnerPairingDialog(
                                                 Toast.makeText(context, if (isDe) "Code kopiert!" else "Couple code copied!", Toast.LENGTH_SHORT).show()
                                             },
                                             shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.testTag("btn_copy_couple_code")
+                                            modifier = Modifier.weight(1f).testTag("btn_copy_couple_code")
                                         ) {
-                                            Icon(imageVector = Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(t("copy_code"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Icon(imageVector = Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(t("copy_code"), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                         }
 
                                         // Share Code Button
@@ -724,12 +728,46 @@ fun PartnerPairingDialog(
                                                 context.startActivity(Intent.createChooser(sendIntent, "Share TwoGether Code"))
                                             },
                                             shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.testTag("btn_share_couple_code")
+                                            modifier = Modifier.weight(1f).testTag("btn_share_couple_code")
                                         ) {
-                                            Icon(imageVector = Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(t("share_code"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Icon(imageVector = Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(15.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(t("share_code"), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                         }
+
+                                        // Regenerate Code Button
+                                        OutlinedButton(
+                                            onClick = onRegenerateCode,
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.testTag("btn_regenerate_couple_code")
+                                        ) {
+                                            Icon(imageVector = Icons.Filled.Autorenew, contentDescription = null, modifier = Modifier.size(15.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(if (isDe) "Neu" else "New", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.CloudDone,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (isDe) "60 Mio.+ Kombinationen • Auto-Cloud-Bereinigung" else "60M+ Combinations • Auto Cloud Pruning",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        )
                                     }
                                 }
                             }

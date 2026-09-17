@@ -573,6 +573,13 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         couplePreferences.disconnectPairing()
     }
 
+    fun regenerateCoupleCode() {
+        viewModelScope.launch {
+            val newCode = repository.generateNewVerifiedCoupleCode()
+            _newCreatedAlert.value = "Neuer Paar-Code: $newCode"
+        }
+    }
+
     fun unlinkPartner(keepOwnEvents: Boolean) {
         viewModelScope.launch {
             repository.unlinkPartner(keepOwnEvents)

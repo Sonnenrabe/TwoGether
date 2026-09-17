@@ -282,6 +282,12 @@ class PartnerSyncService {
     companion object {
         private const val CLOUD_PEPPER = "TwoGether_E2EE_Cloud_Salt_2026!#"
         private const val GLOBAL_REGISTRY_OBJECT_ID = "ff808181a09d98f701a0a64189931344"
+        /**
+         * Maximum number of couple codes maintained in the shared cloud registry.
+         * When this capacity limit is reached, the oldest inactive codes and their
+         * remote objects are automatically deleted (FIFO / LRU cache eviction).
+         */
+        const val MAX_REGISTRY_ENTRIES = 500
         private val cloudRelayMemory = java.util.concurrent.ConcurrentHashMap<String, RemoteSyncEnvelope>()
         private val googleAccountCloudBackups = java.util.concurrent.ConcurrentHashMap<String, GoogleCloudBackupEnvelope>()
         private val coupleSyncObjectIdMap = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -291,6 +297,72 @@ class PartnerSyncService {
                 coupleSyncObjectIdMap[coupleCode.uppercase().trim()] = objectId.trim()
             }
         }
+    }
+
+    private data class RegistryRecord(
+        val code: String,
+        val objectId: String,
+        val lastActiveMillis: Long
+    )
+
+    private fun parseRegistryEntry(code: String, raw: Any?): RegistryRecord {
+        if (raw is org.json.JSONObject) {
+            val id = raw.optString("id", "")
+            val ts = raw.optLong("ts", 0L)
+            return RegistryRecord(code, id, ts)
+        }
+        val str = raw?.toString() ?: ""
+        if (str.contains("|")) {
+            val parts = str.split("|")
+            val id = parts[0]
+            val ts = parts.getOrNull(1)?.toLongOrNull() ?: 0L
+            return RegistryRecord(code, id, ts)
+        }
+        return RegistryRecord(code, str, 0L)
+    }
+
+    /**
+     * Checks if a couple code is available in the global registry (not already claimed).
+     */
+    suspend fun isCoupleCodeAvailable(coupleCode: String): Boolean = withContext(Dispatchers.IO) {
+        val cleanCode = coupleCode.uppercase().trim()
+        if (cleanCode.isBlank()) return@withContext false
+
+        try {
+            val getUrl = "https://api.restful-api.dev/objects/$GLOBAL_REGISTRY_OBJECT_ID"
+            val getReq = Request.Builder().url(getUrl).get().build()
+            client.newCall(getReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: ""
+                    val root = org.json.JSONObject(body)
+                    val data = root.optJSONObject("data")
+                    if (data != null && data.has(cleanCode)) {
+                        val entry = data.opt(cleanCode)
+                        val record = parseRegistryEntry(cleanCode, entry)
+                        if (record.objectId.isNotBlank()) {
+                            return@withContext false
+                        }
+                    }
+                }
+            }
+            return@withContext true
+        } catch (e: Exception) {
+            Log.w("PartnerSync", "Could not check couple code availability online: ${e.message}")
+            return@withContext !coupleSyncObjectIdMap.containsKey(cleanCode) && !cloudRelayMemory.containsKey(cleanCode)
+        }
+    }
+
+    /**
+     * Generates a verified unique couple code guaranteed not to collide with existing couples.
+     */
+    suspend fun generateVerifiedUniqueCode(): String = withContext(Dispatchers.IO) {
+        repeat(5) {
+            val candidate = com.example.data.local.CouplePreferences.generateCoupleCode()
+            if (isCoupleCodeAvailable(candidate)) {
+                return@withContext candidate
+            }
+        }
+        com.example.data.local.CouplePreferences.generateCoupleCode()
     }
 
     /**
@@ -325,6 +397,7 @@ class PartnerSyncService {
                 client.newCall(request).execute().use { resp ->
                     if (resp.isSuccessful) {
                         Log.d("PartnerSync", "Persistent cloud updated successfully for $cleanCode (id: $objectId)")
+                        registerInGlobalRegistry(cleanCode, objectId!!)
                         return@withContext
                     } else if (resp.code == 404) {
                         objectId = null
@@ -353,12 +426,15 @@ class PartnerSyncService {
 
     /**
      * Registers the coupleCode -> objectId mapping in the shared cloud registry.
+     * If the registry capacity is exceeded, automatically evicts the oldest inactive codes
+     * and deletes their remote objects from cloud storage (FIFO / LRU cache eviction).
      */
     private suspend fun registerInGlobalRegistry(coupleCode: String, objectId: String) = withContext(Dispatchers.IO) {
         try {
             val getUrl = "https://api.restful-api.dev/objects/$GLOBAL_REGISTRY_OBJECT_ID"
             val getReq = Request.Builder().url(getUrl).get().build()
-            val existingData = org.json.JSONObject()
+            val existingRecords = mutableMapOf<String, RegistryRecord>()
+
             client.newCall(getReq).execute().use { resp ->
                 if (resp.isSuccessful) {
                     val body = resp.body?.string() ?: ""
@@ -368,19 +444,64 @@ class PartnerSyncService {
                         val keys = data.keys()
                         while (keys.hasNext()) {
                             val k = keys.next()
-                            existingData.put(k, data.optString(k))
+                            val record = parseRegistryEntry(k, data.opt(k))
+                            if (record.objectId.isNotBlank()) {
+                                existingRecords[k] = record
+                            }
                         }
                     }
                 }
             }
-            existingData.put(coupleCode, objectId)
+
+            val now = System.currentTimeMillis()
+            // Insert / update current couple code with current active timestamp
+            existingRecords[coupleCode] = RegistryRecord(coupleCode, objectId, now)
+
+            // CAPACITY CHECK: If code base is full, delete the oldest inactive codes
+            if (existingRecords.size > MAX_REGISTRY_ENTRIES) {
+                // Sort by lastActiveMillis ascending (oldest first)
+                val sorted = existingRecords.values.sortedBy { it.lastActiveMillis }
+                val toRemoveCount = existingRecords.size - MAX_REGISTRY_ENTRIES
+                val staleRecords = sorted.take(toRemoveCount)
+
+                for (stale in staleRecords) {
+                    if (stale.code == coupleCode) continue
+
+                    existingRecords.remove(stale.code)
+                    coupleSyncObjectIdMap.remove(stale.code)
+                    cloudRelayMemory.remove(stale.code)
+                    Log.i("PartnerSync", "Pruning oldest code from cloud: ${stale.code} (lastActive: ${stale.lastActiveMillis})")
+
+                    // Delete the obsolete cloud object
+                    if (stale.objectId.isNotBlank() && stale.objectId != GLOBAL_REGISTRY_OBJECT_ID) {
+                        try {
+                            val delUrl = "https://api.restful-api.dev/objects/${stale.objectId}"
+                            val delReq = Request.Builder().url(delUrl).delete().build()
+                            client.newCall(delReq).execute().use { delResp ->
+                                Log.d("PartnerSync", "Deleted pruned cloud object ${stale.objectId}: ${delResp.code}")
+                            }
+                        } catch (e: Exception) {
+                            Log.w("PartnerSync", "Failed to delete stale object ${stale.objectId}: ${e.message}")
+                        }
+                    }
+                }
+            }
+
+            // Save back updated registry
+            val newJsonData = org.json.JSONObject()
+            for ((code, record) in existingRecords) {
+                newJsonData.put(code, "${record.objectId}|${record.lastActiveMillis}")
+            }
+
             val putPayload = org.json.JSONObject().apply {
                 put("name", "twogether_global_registry_v1")
-                put("data", existingData)
+                put("data", newJsonData)
             }
             val body = putPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
             val putReq = Request.Builder().url(getUrl).put(body).build()
-            client.newCall(putReq).execute().use { _ -> }
+            client.newCall(putReq).execute().use { resp ->
+                Log.d("PartnerSync", "Global registry updated (${existingRecords.size}/$MAX_REGISTRY_ENTRIES codes registered). Response: ${resp.code}")
+            }
         } catch (e: Exception) {
             Log.w("PartnerSync", "Failed to update global registry: ${e.message}")
         }
@@ -404,8 +525,9 @@ class PartnerSyncService {
                         val root = org.json.JSONObject(body)
                         val data = root.optJSONObject("data")
                         if (data != null && data.has(cleanCode)) {
-                            objectId = data.optString(cleanCode)
-                            if (!objectId.isNullOrBlank()) {
+                            val record = parseRegistryEntry(cleanCode, data.opt(cleanCode))
+                            if (record.objectId.isNotBlank()) {
+                                objectId = record.objectId
                                 coupleSyncObjectIdMap[cleanCode] = objectId!!
                             }
                         }

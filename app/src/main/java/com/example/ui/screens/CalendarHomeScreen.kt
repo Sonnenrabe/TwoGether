@@ -560,6 +560,7 @@ fun CalendarHomeScreen(
             onExportToGoogleDriveSaf = { uri -> viewModel.exportToGoogleDriveSaf(uri) },
             onImportFromGoogleDriveSaf = { uri -> viewModel.importFromGoogleDriveSaf(uri) },
             onClearDriveStatus = { viewModel.clearDriveStatusMessage() },
+            onRegenerateCode = { viewModel.regenerateCoupleCode() },
             onUnlinkPartner = { keepOwnEvents ->
                 viewModel.unlinkPartner(keepOwnEvents)
             },

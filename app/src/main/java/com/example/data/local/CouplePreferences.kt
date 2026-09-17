@@ -396,11 +396,25 @@ class CouplePreferences(context: Context) {
     }
 
     companion object {
+        private val ROMANTIC_WORDS = listOf(
+            "LOVE", "HEART", "PAIR", "BOND", "SOUL", "DATE", "SWEET", "COUPLE", "NEST",
+            "MOON", "STAR", "SUN", "SKY", "ROSE", "FLAME", "WISH", "DREAM", "SPARK",
+            "BLISS", "MAGIC", "ANGEL", "HONEY", "DEAR", "PEACE", "HARMONY", "FOREVER",
+            "ALWAYS", "TRULY", "CHARM", "GLOW", "SHINE", "NOVA", "GEM", "PEACH",
+            "PLUM", "LOTUS", "BLOOM", "OCEAN", "RIVER", "HAVEN", "OASIS", "COZY",
+            "WARM", "SMILE", "PURE", "KIND", "HOPE", "LIGHT", "JOY", "CLOUD",
+            "RUBY", "PEARL", "AMOR", "VIDA", "AURORA", "ORBIT", "EMBER", "VALLEY"
+        )
+        // 32 unambiguous characters (excludes 0, O, 1, I to prevent reading mistakes)
+        private const val ALPHANUMERIC_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
         fun generateCoupleCode(): String {
-            val words = listOf("LOVE", "HEART", "PAIR", "BOND", "SOUL", "DATE", "SWEET", "COUPLE", "NEST")
-            val prefix = words.random()
-            val number = (100..999).random()
-            return "$prefix-$number"
+            val prefix = ROMANTIC_WORDS.random()
+            val secureRandom = java.security.SecureRandom()
+            val suffix = (1..4)
+                .map { ALPHANUMERIC_CHARS[secureRandom.nextInt(ALPHANUMERIC_CHARS.length)] }
+                .joinToString("")
+            return "$prefix-$suffix"
         }
     }
 }

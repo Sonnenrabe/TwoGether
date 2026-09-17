@@ -185,7 +185,7 @@ class AppointmentRepository(
             appointmentDao.clearAll()
         }
 
-        val newCoupleCode = CouplePreferences.generateCoupleCode()
+        val newCoupleCode = syncService.generateVerifiedUniqueCode()
         couplePreferences.updateProfile(
             coupleCode = newCoupleCode,
             isPaired = false,
@@ -193,6 +193,18 @@ class AppointmentRepository(
         )
 
         WidgetUpdateHelper.updateAllWidgets(context)
+    }
+
+    /**
+     * Generates and assigns a new verified unique couple code.
+     */
+    suspend fun generateNewVerifiedCoupleCode(): String {
+        val newCode = syncService.generateVerifiedUniqueCode()
+        couplePreferences.updateProfile(
+            coupleCode = newCode,
+            isPaired = false
+        )
+        return newCode
     }
 
     /**
