@@ -56,6 +56,11 @@ class AppointmentRepository(
         return appointmentDao.getAppointmentById(id)?.toDomain(cats)
     }
 
+    suspend fun getAllActiveAppointments(): List<Appointment> = withContext(Dispatchers.IO) {
+        val cats = couplePreferences.appointmentCategories.value
+        appointmentDao.getAllActiveAppointmentsList().map { it.toDomain(cats) }
+    }
+
     suspend fun addCategory(category: AppointmentCategory) = withContext(Dispatchers.IO) {
         couplePreferences.addOrUpdateAppointmentCategory(category)
         val profile = couplePreferences.coupleProfile.value

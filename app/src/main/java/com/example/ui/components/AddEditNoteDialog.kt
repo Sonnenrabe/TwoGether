@@ -85,6 +85,7 @@ fun AddEditNoteDialog(
     }
     var newItemText by remember { mutableStateOf("") }
     var titleError by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
 
     val togetherColor = try { Color(android.graphics.Color.parseColor(profile.togetherColorHex)) } catch (e: Exception) { Color(0xFF8B5CF6) }
     val myColor = try { Color(android.graphics.Color.parseColor(profile.myColorHex)) } catch (e: Exception) { Color(0xFF3B82F6) }
@@ -538,10 +539,12 @@ fun AddEditNoteDialog(
 
                         FilledIconButton(
                             onClick = {
+                                if (isSaving) return@FilledIconButton
                                 if (title.isBlank()) {
                                     titleError = true
                                     return@FilledIconButton
                                 }
+                                isSaving = true
                                 val createdBy = when (ownerType) {
                                     OwnerType.ME -> profile.myName
                                     OwnerType.PARTNER -> profile.partnerName
@@ -561,6 +564,7 @@ fun AddEditNoteDialog(
                                 )
                                 onSave(noteToSave)
                             },
+                            enabled = !isSaving,
                             modifier = Modifier
                                 .size(52.dp)
                                 .testTag("btn_save_note")

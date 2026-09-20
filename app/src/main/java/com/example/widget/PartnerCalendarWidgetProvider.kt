@@ -5,9 +5,15 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import com.example.R
+import com.example.data.local.AppDatabase
+import com.example.data.local.CouplePreferences
+import com.example.data.remote.PartnerSyncService
+import com.example.data.repository.AppointmentRepository
+import com.example.data.repository.NoteRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class PartnerCalendarWidgetProvider : AppWidgetProvider() {
 
@@ -85,6 +91,59 @@ class PartnerCalendarWidgetProvider : AppWidgetProvider() {
                             prefs.edit().putLong("selected_millis", millis).apply()
                             WidgetUpdateHelper.updateAppWidget(context, appWidgetManager, appWidgetId)
                         }
+                        ACTION_FORCE_SYNC -> {
+                            val couplePrefs = CouplePreferences(context)
+                            val isDe = couplePrefs.coupleProfile.value.appLanguage.equals("DE", ignoreCase = true)
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        if (isDe) "Synchronisiere... 🔄" else "Syncing... 🔄",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                } catch (e: Exception) {
+                                    // ignore toast error
+                                }
+                            }
+
+                            val db = AppDatabase.getInstance(context)
+                            val syncService = PartnerSyncService()
+                            val repo = AppointmentRepository(
+                                context = context,
+                                appointmentDao = db.appointmentDao(),
+                                couplePreferences = couplePrefs,
+                                syncService = syncService
+                            )
+                            val noteRepo = NoteRepository(
+                                context = context,
+                                noteDao = db.noteDao(),
+                                couplePreferences = couplePrefs,
+                                syncService = syncService
+                            )
+                            try {
+                                val code = couplePrefs.coupleProfile.value.coupleCode
+                                if (code.isNotBlank()) {
+                                    repo.syncWithPartner(code)
+                                    noteRepo.syncNotesWithPartner(code)
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+
+                            WidgetUpdateHelper.updateAppWidget(context, appWidgetManager, appWidgetId)
+
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        if (isDe) "Synchronisiert! ✓" else "Synced! ✓",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                } catch (e: Exception) {
+                                    // ignore toast error
+                                }
+                            }
+                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -100,6 +159,7 @@ class PartnerCalendarWidgetProvider : AppWidgetProvider() {
         const val ACTION_NEXT_MONTH = "com.example.widget.ACTION_NEXT_MONTH"
         const val ACTION_TODAY = "com.example.widget.ACTION_TODAY"
         const val ACTION_SELECT_DAY = "com.example.widget.ACTION_SELECT_DAY"
+        const val ACTION_FORCE_SYNC = "com.example.widget.ACTION_FORCE_SYNC"
         const val EXTRA_SELECTED_DATE_MILLIS = "extra_selected_date_millis"
     }
 }

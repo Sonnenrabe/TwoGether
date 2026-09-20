@@ -1,6 +1,12 @@
 package com.example
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        createNotificationChannel()
         handleWidgetIntent(intent)
         enableEdgeToEdge()
         setContent {
@@ -41,6 +48,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelId = "partner_calendar_reminders_high"
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channel = NotificationChannel(
+                channelId,
+                "Termine & Erinnerungen",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Erinnerungen für gemeinsame und persönliche Termine"
+                enableLights(true)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 350, 200, 350)
+                val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                setSound(
+                    soundUri,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -52,6 +85,8 @@ class MainActivity : ComponentActivity() {
         val dateMillis = intent.getLongExtra("EXTRA_DATE_MILLIS", -1L)
         val shouldOpenAdd = intent.getBooleanExtra("EXTRA_OPEN_ADD", false)
         val appointmentId = intent.getStringExtra("EXTRA_APPOINTMENT_ID")
+            ?: intent.getStringExtra("EXTRA_EVENT_ID")
+            ?: intent.getStringExtra("EXTRA_ID")
 
         if (dateMillis > 0) {
             viewModel.selectDate(dateMillis)

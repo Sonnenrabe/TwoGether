@@ -83,7 +83,9 @@ data class CalendarUiState(
     val noteCategories: List<NoteCategory> = NoteCategory.DEFAULT_CATEGORIES,
     val appointmentCategories: List<AppointmentCategory> = AppointmentCategory.DEFAULT_CATEGORIES,
     val isManageCategoriesDialogOpen: Boolean = false,
-    val manageCategoriesInitialTab: Int = 0
+    val manageCategoriesInitialTab: Int = 0,
+    val isNoteDetailDialogOpen: Boolean = false,
+    val selectedDetailNote: Note? = null
 )
 
 class CalendarViewModel(application: Application) : AndroidViewModel(application) {
@@ -100,6 +102,7 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         noteDao = db.noteDao(),
         couplePreferences = couplePreferences
     )
+    private val reminderScheduler = com.example.util.AppointmentReminderScheduler(application)
 
     private val _currentMainTab = MutableStateFlow(MainNavigationTab.CALENDAR)
     private val _selectedDateMillis = MutableStateFlow(System.currentTimeMillis())
@@ -126,6 +129,8 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     private val _editingNote = MutableStateFlow<Note?>(null)
     private val _isManageCategoriesDialogOpen = MutableStateFlow(false)
     private val _manageCategoriesInitialTab = MutableStateFlow(0)
+    private val _isNoteDetailDialogOpen = MutableStateFlow(false)
+    private val _selectedDetailNote = MutableStateFlow<Note?>(null)
 
     // Partner link request StateFlow
     private val _pendingLinkRequest = MutableStateFlow<PartnerLinkRequest?>(null)
@@ -164,7 +169,9 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         noteRepository.noteCategories,
         _isManageCategoriesDialogOpen,
         repository.appointmentCategories,
-        _manageCategoriesInitialTab
+        _manageCategoriesInitialTab,
+        _isNoteDetailDialogOpen,
+        _selectedDetailNote
     ) { args ->
         @Suppress("UNCHECKED_CAST")
         val allAppts = args[0] as List<Appointment>
@@ -195,6 +202,8 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         val isManageCategoriesOpen = args[25] as Boolean
         val apptCategories = args[26] as List<AppointmentCategory>
         val manageInitialTab = args[27] as Int
+        val isNbDetailOpen = args[28] as Boolean
+        val selectedNbDetail = args[29] as Note?
 
         // Calculate selected day bounds
         val selCal = Calendar.getInstance().apply { timeInMillis = selectedDate }
@@ -262,7 +271,9 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             noteCategories = categories,
             appointmentCategories = apptCategories,
             isManageCategoriesDialogOpen = isManageCategoriesOpen,
-            manageCategoriesInitialTab = manageInitialTab
+            manageCategoriesInitialTab = manageInitialTab,
+            isNoteDetailDialogOpen = isNbDetailOpen,
+            selectedDetailNote = selectedNbDetail
         )
     }.stateIn(
         scope = viewModelScope,
@@ -281,6 +292,14 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             if (profile.isPaired && profile.coupleCode.isNotBlank()) {
                 syncWithPartner()
                 syncNotes()
+            }
+
+            // Reschedule all future appointment reminders
+            try {
+                val allActive = repository.getAllActiveAppointments()
+                reminderScheduler.rescheduleAllReminders(allActive)
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
 
@@ -363,11 +382,25 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun openAddNoteDialog() {
+        _selectedDetailNote.value = null
+        _isNoteDetailDialogOpen.value = false
         _editingNote.value = null
         _isAddEditNoteDialogOpen.value = true
     }
 
+    fun openNoteDetailDialog(note: Note) {
+        _selectedDetailNote.value = note
+        _isNoteDetailDialogOpen.value = true
+    }
+
+    fun closeNoteDetailDialog() {
+        _isNoteDetailDialogOpen.value = false
+        _selectedDetailNote.value = null
+    }
+
     fun openEditNoteDialog(note: Note) {
+        _isNoteDetailDialogOpen.value = false
+        _selectedDetailNote.value = null
         _editingNote.value = note
         _isAddEditNoteDialogOpen.value = true
     }
@@ -378,20 +411,25 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun saveNote(note: Note) {
+        // Immediately dismiss the window as requested to eliminate latency and duplicate taps
+        _isAddEditNoteDialogOpen.value = false
+        _editingNote.value = null
+        _newCreatedAlert.value = "Note saved 💕"
+
         viewModelScope.launch {
             noteRepository.saveNote(note)
-            _isAddEditNoteDialogOpen.value = false
-            _editingNote.value = null
-            _newCreatedAlert.value = "Note saved 💕"
         }
     }
 
     fun deleteNote(id: String) {
+        _isNoteDetailDialogOpen.value = false
+        _selectedDetailNote.value = null
+        if (_editingNote.value?.id == id) {
+            closeNoteDialog()
+        }
+
         viewModelScope.launch {
             noteRepository.deleteNote(id)
-            if (_editingNote.value?.id == id) {
-                closeNoteDialog()
-            }
         }
     }
 
@@ -574,22 +612,29 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun saveAppointment(appointment: Appointment) {
+        // Immediately dismiss the window as requested to eliminate latency and duplicate taps
+        _isAddDialogOpen.value = false
+        _editingAppointment.value = null
+        _newCreatedAlert.value = "Saved \"${appointment.title}\""
+
         viewModelScope.launch {
             val coupleCode = couplePreferences.coupleProfile.value.coupleCode
             val toSave = appointment.copy(coupleId = coupleCode)
             repository.saveAppointment(toSave)
-            _isAddDialogOpen.value = false
-            _editingAppointment.value = null
-            _newCreatedAlert.value = "Saved \"${appointment.title}\""
+            // Schedule high-priority alarm notification for appointment
+            reminderScheduler.scheduleReminder(toSave)
         }
     }
 
     fun deleteAppointment(id: String) {
+        // Immediately dismiss detail dialog
+        _isDetailDialogOpen.value = false
+        _selectedDetailAppointment.value = null
+        _newCreatedAlert.value = "Appointment removed"
+
         viewModelScope.launch {
             repository.deleteAppointment(id)
-            _isDetailDialogOpen.value = false
-            _selectedDetailAppointment.value = null
-            _newCreatedAlert.value = "Appointment removed"
+            reminderScheduler.cancelReminder(id)
         }
     }
 
@@ -612,6 +657,12 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
                 val count = apptResult.getOrDefault(0) + noteResult.getOrDefault(0)
                 _syncState.value = SyncState.SUCCESS
                 _syncMessage.value = if (count > 0) "Synced! ($count new updates)" else "Up to date with partner 💕"
+                try {
+                    val allActive = repository.getAllActiveAppointments()
+                    reminderScheduler.rescheduleAllReminders(allActive)
+                } catch (e: Exception) {
+                    // Non-blocking
+                }
             } else {
                 _syncState.value = SyncState.OFFLINE
                 _syncMessage.value = "Offline (Local calendar saved)"

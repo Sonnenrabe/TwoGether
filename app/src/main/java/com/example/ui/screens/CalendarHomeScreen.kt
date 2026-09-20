@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewAgenda
@@ -65,10 +66,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.AddEditAppointmentDialog
 import com.example.ui.components.AddEditNoteDialog
@@ -79,6 +86,7 @@ import com.example.ui.components.FilterChipRow
 import com.example.ui.components.ManageCategoriesDialog
 import com.example.ui.components.MonthCalendarView
 import com.example.ui.components.MonthYearPickerDialog
+import com.example.ui.components.NoteDetailDialog
 import com.example.ui.components.PartnerHeaderBar
 import com.example.ui.components.PartnerPairingDialog
 import com.example.ui.components.WeekCalendarView
@@ -100,6 +108,23 @@ fun CalendarHomeScreen(
     val driveStatusMessage by viewModel.driveStatusMessage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val lang = uiState.coupleProfile.appLanguage
+    val context = LocalContext.current
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
     LaunchedEffect(uiState.newCreatedAlert) {
         uiState.newCreatedAlert?.let { message ->
@@ -175,8 +200,8 @@ fun CalendarHomeScreen(
                         modifier = Modifier.testTag("btn_top_settings")
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = "Settings & Pairing",
+                            imageVector = Icons.Filled.Menu,
+                            contentDescription = "Menu & Settings",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -451,7 +476,7 @@ fun CalendarHomeScreen(
                     onSelectCategory = { viewModel.setNoteCategoryFilter(it) },
                     selectedOwnerType = uiState.selectedNoteOwnerType,
                     onSelectOwnerType = { viewModel.setNoteOwnerTypeFilter(it) },
-                    onNoteClick = { viewModel.openEditNoteDialog(it) },
+                    onNoteClick = { viewModel.openNoteDetailDialog(it) },
                     onTogglePin = { id, pinned -> viewModel.togglePinNote(id, pinned) },
                     onToggleChecklistItem = { noteId, idx, isChecked ->
                         viewModel.toggleChecklistItem(noteId, idx, isChecked)
@@ -535,6 +560,29 @@ fun CalendarHomeScreen(
             },
             onDelete = {
                 viewModel.deleteAppointment(uiState.selectedDetailAppointment!!.id)
+            }
+        )
+    }
+
+    if (uiState.isNoteDetailDialogOpen && uiState.selectedDetailNote != null) {
+        val noteToView = uiState.selectedDetailNote!!
+        NoteDetailDialog(
+            note = noteToView,
+            profile = uiState.coupleProfile,
+            onDismiss = { viewModel.closeNoteDetailDialog() },
+            onEdit = {
+                viewModel.closeNoteDetailDialog()
+                viewModel.openEditNoteDialog(noteToView)
+            },
+            onDelete = {
+                viewModel.deleteNote(noteToView.id)
+                viewModel.closeNoteDetailDialog()
+            },
+            onTogglePin = { noteId, isPinned ->
+                viewModel.togglePinNote(noteId, isPinned)
+            },
+            onShare = { note ->
+                viewModel.shareNote(note)
             }
         )
     }

@@ -133,11 +133,18 @@ object WidgetUpdateHelper {
             views.setInt(R.id.widget_btn_prev, "setBackgroundResource", buttonBg)
             views.setInt(R.id.widget_btn_today, "setBackgroundResource", buttonBg)
             views.setInt(R.id.widget_btn_next, "setBackgroundResource", buttonBg)
-            views.setInt(R.id.widget_btn_add, "setBackgroundResource", buttonBg)
 
+            val syncButtonBg = if (isWidgetDark) R.drawable.widget_button_bg_dark else R.drawable.widget_sync_button_bg
+            views.setInt(R.id.widget_btn_sync, "setBackgroundResource", syncButtonBg)
+            views.setImageViewResource(R.id.widget_btn_sync, R.drawable.ic_widget_sync)
+            views.setInt(R.id.widget_btn_sync, "setColorFilter", Color.WHITE)
+
+            val navArrowColor = if (isWidgetDark) Color.WHITE else primaryTextColor
             views.setTextColor(R.id.widget_month_title, primaryTextColor)
-            views.setTextColor(R.id.widget_btn_prev, primaryTextColor)
-            views.setTextColor(R.id.widget_btn_next, primaryTextColor)
+            views.setTextColor(R.id.widget_btn_prev, navArrowColor)
+            views.setTextColor(R.id.widget_btn_next, navArrowColor)
+            val todayTextColor = if (isWidgetDark) Color.parseColor("#F472B6") else Color.parseColor("#DB2777")
+            views.setTextColor(R.id.widget_btn_today, todayTextColor)
             views.setTextColor(R.id.widget_selected_date_label, primaryTextColor)
             views.setTextColor(R.id.widget_selected_count_badge, secondaryTextColor)
 
@@ -382,10 +389,19 @@ object WidgetUpdateHelper {
                 PendingIntent.getBroadcast(context, appWidgetId * 10 + 3, todayIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             )
 
-            // Add Event button in header: Opens App to add appointment on the currently selected date
+            // Force Sync button in header: Directly forces data synchronization from the widget
+            val syncIntent = Intent(context, PartnerCalendarWidgetProvider::class.java).apply {
+                action = PartnerCalendarWidgetProvider.ACTION_FORCE_SYNC
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            }
             views.setOnClickPendingIntent(
-                R.id.widget_btn_add,
-                PendingIntent.getActivity(context, appWidgetId * 10 + 4, addForSelectedDayIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                R.id.widget_btn_sync,
+                PendingIntent.getBroadcast(
+                    context,
+                    appWidgetId * 10 + 4,
+                    syncIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
             )
 
             // Tapping date label launches the app on that selected date

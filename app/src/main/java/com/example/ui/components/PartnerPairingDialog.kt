@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -69,7 +71,7 @@ fun PartnerPairingDialog(
     onDismissPartnerLink: (PartnerLinkRequest) -> Unit = {}
 ) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(-1) }
 
     val createDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -447,77 +449,267 @@ fun PartnerPairingDialog(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Filled.Favorite,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "TwoGether - " + t("settings"),
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
+                if (selectedTab == -1) {
+                    // Header for Settings Categories Overview
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Menu,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = if (isDe) "Einstellungen" else "Settings",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isDe) "Kategorie auswählen" else "Choose a category",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 12.sp
+                                    )
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(36.dp).testTag("btn_close_settings_menu")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Close",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        )
+                        }
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = "Close",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Pending partner link request banner if active
+                    if (pendingLinkRequest != null) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { selectedTab = 0 }
+                                .testTag("banner_pending_link_category")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = "💕", fontSize = 22.sp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (isDe) "Partner-Verbindung wartet!" else "Partner Link Request!",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = if (isDe) "${pendingLinkRequest.partnerName} möchte sich koppeln. Tippe hier!" else "${pendingLinkRequest.partnerName} wants to connect. Tap here!",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
                     }
-                }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                    // Clean List of Settings Categories: Pairing, Design, Language, Profiles, Google Cloud
+                    val categoriesList = listOf(
+                        // 0: Pairing
+                        Triple(
+                            0,
+                            t("pairing_tab"),
+                            if (profile.partnerName.isNotBlank() && profile.coupleCode.isNotBlank())
+                                "${if (isDe) "Verbunden mit" else "Linked with"} ${profile.partnerName} • Auto-Sync: ${profile.autoSyncIntervalMinutes}m"
+                            else
+                                "Code: ${profile.coupleCode} • ${if (isDe) "Mit Partner verbinden" else "Connect with partner"}"
+                        ),
+                        // 3: Design
+                        Triple(
+                            3,
+                            t("appearance_tab"),
+                            "${if (isDe) "App" else "App"}: ${selectedAppTheme.lowercase().replaceFirstChar { it.uppercase() }} • Widget: ${selectedWidgetTheme.lowercase().replaceFirstChar { it.uppercase() }}"
+                        ),
+                        // 4: Language (strictly without emoji)
+                        Triple(
+                            4,
+                            t("language_tab"),
+                            when (selectedLanguage.uppercase()) {
+                                "DE" -> "Deutsch"
+                                "EN" -> "English"
+                                "IT" -> "Italiano"
+                                "ES" -> "Español"
+                                "FR" -> "Français"
+                                else -> if (isDe) "Systemstandard" else "System Default"
+                            }
+                        ),
+                        // 2: Profiles & Colors
+                        Triple(
+                            2,
+                            t("profiles_tab"),
+                            "${profile.myName} & ${profile.partnerName} • ${if (isDe) "Kalenderfarben anpassen" else "Custom calendar colors"}"
+                        ),
+                        // 1: Google Cloud & Backup
+                        Triple(
+                            1,
+                            t("cloud_tab"),
+                            if (!profile.googleAccountEmail.isNullOrBlank()) profile.googleAccountEmail!! else (if (isDe) "Konto sichern & exportieren" else "Cloud sync & backup")
+                        )
+                    )
 
-                // Tabs: 0. Pairing, 1. Google Cloud, 2. Colors & Names, 3. Design, 4. Language
-                ScrollableTabRow(
-                    selectedTabIndex = selectedTab,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    edgePadding = 6.dp,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                ) {
-                    Tab(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        text = { Text(t("pairing_tab"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp) }
-                    )
-                    Tab(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        text = { Text(t("cloud_tab"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp) }
-                    )
-                    Tab(
-                        selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
-                        text = { Text(t("profiles_tab"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp) }
-                    )
-                    Tab(
-                        selected = selectedTab == 3,
-                        onClick = { selectedTab = 3 },
-                        text = { Text(t("appearance_tab"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp) }
-                    )
-                    Tab(
-                        selected = selectedTab == 4,
-                        onClick = { selectedTab = 4 },
-                        text = { Text(t("language_tab") + " 🌐", fontWeight = FontWeight.SemiBold, fontSize = 12.sp) }
-                    )
-                }
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        categoriesList.forEach { (catId, title, subtitle) ->
+                            val (catIcon, catBgColor, catTintColor, catTag) = when (catId) {
+                                0 -> arrayOf(Icons.Filled.Favorite, Color(0xFFFCE7F3), Color(0xFFE11D48), "btn_category_pairing")
+                                3 -> arrayOf(Icons.Filled.Palette, Color(0xFFEDE9FE), Color(0xFF7C3AED), "btn_category_design")
+                                4 -> arrayOf(Icons.Filled.Translate, Color(0xFFE0F2FE), Color(0xFF0284C7), "btn_category_language")
+                                2 -> arrayOf(Icons.Filled.Person, Color(0xFFFEF3C7), Color(0xFFD97706), "btn_category_profiles")
+                                else -> arrayOf(Icons.Filled.CloudDone, Color(0xFFDCFCE7), Color(0xFF059669), "btn_category_cloud")
+                            }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable { selectedTab = catId }
+                                    .testTag(catTag as String)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(CircleShape)
+                                            .background(catBgColor as Color),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = catIcon as androidx.compose.ui.graphics.vector.ImageVector,
+                                            contentDescription = null,
+                                            tint = catTintColor as Color,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = title,
+                                            style = MaterialTheme.typography.titleMedium.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 15.sp
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = subtitle,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 12.sp
+                                            ),
+                                            maxLines = 1
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Header inside a specific Category with Back Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { selectedTab = -1 },
+                                modifier = Modifier.size(36.dp).testTag("btn_back_to_settings_categories")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to Menu",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = when (selectedTab) {
+                                    0 -> t("pairing_tab")
+                                    1 -> t("cloud_tab")
+                                    2 -> t("profiles_tab")
+                                    3 -> t("appearance_tab")
+                                    4 -> t("language_tab")
+                                    else -> t("settings")
+                                },
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(36.dp).testTag("btn_close_settings_category")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Close",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
-                when (selectedTab) {
-                    0 -> {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    when (selectedTab) {
+                        0 -> {
                         // TAB 0: PAIRING & UNLINK PARTNER (Protected by Google Sign-In)
                         val isGoogleLoggedIn = profile.isGoogleLinked && !profile.googleAccountEmail.isNullOrBlank()
 
@@ -2004,11 +2196,11 @@ fun PartnerPairingDialog(
 
                             val languages = listOf(
                                 AppStrings.SupportedLanguage.SYSTEM to t("lang_system"),
-                                AppStrings.SupportedLanguage.EN to "English 🇬🇧",
-                                AppStrings.SupportedLanguage.DE to "Deutsch 🇩🇪",
-                                AppStrings.SupportedLanguage.IT to "Italiano 🇮🇹",
-                                AppStrings.SupportedLanguage.ES to "Español 🇪🇸",
-                                AppStrings.SupportedLanguage.FR to "Français 🇫🇷"
+                                AppStrings.SupportedLanguage.EN to "English",
+                                AppStrings.SupportedLanguage.DE to "Deutsch",
+                                AppStrings.SupportedLanguage.IT to "Italiano",
+                                AppStrings.SupportedLanguage.ES to "Español",
+                                AppStrings.SupportedLanguage.FR to "Français"
                             )
 
                             languages.forEach { (langObj, label) ->
@@ -2079,6 +2271,7 @@ fun PartnerPairingDialog(
                         }
                     }
                 }
+            }
 
                 // Generous bottom spacer so no content is cut off on any device screen
                 Spacer(modifier = Modifier.height(36.dp))

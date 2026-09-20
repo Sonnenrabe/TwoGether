@@ -71,6 +71,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.os.Build
 import com.example.data.model.Appointment
 import com.example.data.model.AppointmentCategory
 import com.example.data.model.CoupleProfile
@@ -112,6 +117,11 @@ fun AddEditAppointmentDialog(
     var isAllDay by remember { mutableStateOf(editingAppointment?.isAllDay ?: false) }
     var hasReminder by remember { mutableStateOf(editingAppointment?.hasReminder ?: true) }
     var reminderMinutes by remember { mutableIntStateOf(editingAppointment?.reminderMinutesBefore ?: 30) }
+    var isSaving by remember { mutableStateOf(false) }
+
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
 
     // Start & End date millis
     val defaultStart = remember(initialDateMillis) {
@@ -614,7 +624,14 @@ fun AddEditAppointmentDialog(
 
                     Switch(
                         checked = hasReminder,
-                        onCheckedChange = { hasReminder = it },
+                        onCheckedChange = { checked ->
+                            hasReminder = checked
+                            if (checked && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                                    notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            }
+                        },
                         modifier = Modifier.testTag("switch_reminder")
                     )
                 }
@@ -692,7 +709,8 @@ fun AddEditAppointmentDialog(
 
                         FilledIconButton(
                             onClick = {
-                                if (title.isBlank()) return@FilledIconButton
+                                if (isSaving || title.isBlank()) return@FilledIconButton
+                                isSaving = true
                                 val colorHex = when (ownerType) {
                                     OwnerType.TOGETHER -> profile.togetherColorHex
                                     OwnerType.ME -> profile.myColorHex
@@ -716,8 +734,13 @@ fun AddEditAppointmentDialog(
                                     reminderMinutesBefore = reminderMinutes
                                 )
                                 onSave(toSave)
+                                if (hasReminder && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                                        notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                }
                             },
-                            enabled = title.isNotBlank(),
+                            enabled = title.isNotBlank() && !isSaving,
                             modifier = Modifier
                                 .size(52.dp)
                                 .testTag("btn_save_appointment")
