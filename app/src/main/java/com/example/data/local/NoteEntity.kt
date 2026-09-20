@@ -26,12 +26,12 @@ data class NoteEntity(
     val updatedAt: Long,
     val isDeleted: Boolean
 ) {
-    fun toDomain(): Note {
+    fun toDomain(availableCategories: List<NoteCategory> = emptyList()): Note {
         return Note(
             id = id,
             title = title,
             content = content,
-            category = NoteCategory.fromString(category),
+            category = NoteCategory.fromString(category, availableCategories.ifEmpty { NoteCategory.DEFAULT_CATEGORIES }),
             ownerType = OwnerType.fromString(ownerType),
             createdByName = createdByName,
             colorHex = colorHex,

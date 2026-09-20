@@ -97,18 +97,9 @@ fun ManageCategoriesDialog(
         }
     } else {
         noteCategories.map { noteCat ->
-            val localizedName = when (noteCat.id) {
-                NoteCategory.GENERAL.id -> t("filter_cat_general")
-                NoteCategory.DATE_IDEAS.id -> t("filter_cat_date_ideas")
-                NoteCategory.SHOPPING.id -> t("filter_cat_shopping")
-                NoteCategory.LOVE_NOTE.id -> t("filter_cat_love_notes")
-                NoteCategory.TODO.id -> t("filter_cat_todo")
-                NoteCategory.TRAVEL.id -> t("filter_cat_travel")
-                else -> noteCat.displayName
-            }
             UnifiedCategoryItem(
                 id = noteCat.id,
-                displayName = localizedName,
+                displayName = AppStrings.getNoteCategoryName(noteCat, appLanguage),
                 iconEmoji = noteCat.iconEmoji,
                 colorHex = noteCat.defaultColorHex,
                 isCustom = noteCat.isCustom,

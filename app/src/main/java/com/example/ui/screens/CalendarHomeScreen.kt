@@ -25,12 +25,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewWeek
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
@@ -50,6 +54,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -90,6 +95,7 @@ fun CalendarHomeScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val pendingLinkRequest by viewModel.pendingLinkRequest.collectAsStateWithLifecycle()
     val isDriveSyncing by viewModel.isDriveSyncing.collectAsStateWithLifecycle()
     val driveStatusMessage by viewModel.driveStatusMessage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -565,7 +571,68 @@ fun CalendarHomeScreen(
                 viewModel.unlinkPartner(keepOwnEvents)
             },
             onSimulatePartnerPlan = { viewModel.simulatePartnerActivity() },
-            onDisconnect = { viewModel.disconnectPairing() }
+            onDisconnect = { viewModel.disconnectPairing() },
+            onUpdateAutoSyncInterval = { interval -> viewModel.updateAutoSyncInterval(interval) },
+            pendingLinkRequest = pendingLinkRequest,
+            onAcceptPartnerLink = { req -> viewModel.acceptPartnerLink(req) },
+            onDismissPartnerLink = { req -> viewModel.dismissPartnerLink(req) }
+        )
+    }
+
+    // Global Incoming Partner Link Dialog (prompts immediately when partner enters our code)
+    pendingLinkRequest?.let { req ->
+        val isDe = lang == "DE"
+        val reqName = if (req.partnerName.isNotBlank() && req.partnerName != "Partner")
+            req.partnerName
+        else if (isDe) "Dein Partner" else "Your partner"
+
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPartnerLink(req) },
+            icon = {
+                Icon(
+                    imageVector = Icons.Filled.Favorite,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = if (isDe) "Partner möchte verbinden! 💕" else "Partner wants to link up! 💕",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            },
+            text = {
+                Text(
+                    text = if (isDe)
+                        "$reqName hat deinen Paar-Code ${req.coupleCode} eingegeben!\n\nMöchtest du eure Kalender und Notizen jetzt automatisch miteinander verbinden?"
+                    else
+                        "$reqName entered your Couple Code ${req.coupleCode}!\n\nWould you like to link up and sync calendars and notes automatically?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.acceptPartnerLink(req) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.testTag("btn_accept_partner_link")
+                ) {
+                    Icon(imageVector = Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (isDe) "Jetzt verbinden 💕" else "Link Up Now 💕", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.dismissPartnerLink(req) },
+                    modifier = Modifier.testTag("btn_dismiss_partner_link")
+                ) {
+                    Text(if (isDe) "Später" else "Not Now")
+                }
+            },
+            shape = RoundedCornerShape(20.dp)
         )
     }
 }

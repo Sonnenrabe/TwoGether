@@ -13,6 +13,7 @@ import com.example.widget.WidgetUpdateHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -29,22 +30,30 @@ class AppointmentRepository(
         couplePreferences.appointmentCategories
 
     val allActiveAppointments: Flow<List<Appointment>> =
-        appointmentDao.getAllActiveAppointments().map { list ->
-            list.map { it.toDomain() }
+        combine(
+            appointmentDao.getAllActiveAppointments(),
+            couplePreferences.appointmentCategories
+        ) { list, cats ->
+            list.map { it.toDomain(cats) }
         }
 
     fun getAppointmentsForDay(dayStartMillis: Long, dayEndMillis: Long): Flow<List<Appointment>> {
-        return appointmentDao.getAppointmentsForDay(dayStartMillis, dayEndMillis).map { list ->
-            list.map { it.toDomain() }
+        return combine(
+            appointmentDao.getAppointmentsForDay(dayStartMillis, dayEndMillis),
+            couplePreferences.appointmentCategories
+        ) { list, cats ->
+            list.map { it.toDomain(cats) }
         }
     }
 
     suspend fun getAppointmentsForDaySync(dayStartMillis: Long, dayEndMillis: Long): List<Appointment> {
-        return appointmentDao.getAppointmentsForDaySync(dayStartMillis, dayEndMillis).map { it.toDomain() }
+        val cats = couplePreferences.appointmentCategories.value
+        return appointmentDao.getAppointmentsForDaySync(dayStartMillis, dayEndMillis).map { it.toDomain(cats) }
     }
 
     suspend fun getAppointmentById(id: String): Appointment? {
-        return appointmentDao.getAppointmentById(id)?.toDomain()
+        val cats = couplePreferences.appointmentCategories.value
+        return appointmentDao.getAppointmentById(id)?.toDomain(cats)
     }
 
     suspend fun addCategory(category: AppointmentCategory) = withContext(Dispatchers.IO) {
@@ -106,15 +115,7 @@ class AppointmentRepository(
 
     suspend fun syncWithPartner(coupleCode: String): Result<Int> = withContext(Dispatchers.IO) {
         try {
-            // 1. Get all local appointments including deleted markers
-            val localEntities = appointmentDao.getAllForSync()
-            val localList = localEntities.map { it.toDomain() }
-
-            // 2. Push local state to cloud relay
-            val currentCats = couplePreferences.appointmentCategories.value
-            syncService.pushAppointments(coupleCode, localList, currentCats)
-
-            // 3. Pull remote state from cloud relay
+            // 1. Pull remote state from cloud relay FIRST
             val pullResult = syncService.pullAppointmentsAndCategories(coupleCode)
             var mergedCount = 0
             if (pullResult.isSuccess) {
@@ -123,6 +124,7 @@ class AppointmentRepository(
                     couplePreferences.mergeRemoteAppointmentCategories(remoteCats)
                 }
 
+                val localEntities = appointmentDao.getAllForSync()
                 val localMap = localEntities.associateBy { it.id }.toMutableMap()
                 val toUpsert = mutableListOf<AppointmentEntity>()
                 for (remote in remoteList) {
@@ -140,6 +142,12 @@ class AppointmentRepository(
                     appointmentDao.insertAll(toUpsert)
                 }
             }
+
+            // 2. Push unified local state + categories (including tombstones) to cloud relay
+            val allLocalEntities = appointmentDao.getAllForSync()
+            val allLocalList = allLocalEntities.map { it.toDomain() }
+            val allSyncCats = couplePreferences.getAllAppointmentCategoriesForSync()
+            syncService.pushAppointments(coupleCode, allLocalList, allSyncCats)
 
             // Update last sync time
             couplePreferences.updateProfile(lastSyncMillis = System.currentTimeMillis())
@@ -330,4 +338,13 @@ class AppointmentRepository(
         }
         entities.size
     }
+
+    suspend fun announceJoinRequest(coupleCode: String, joinerName: String, joinerDeviceId: String) =
+        syncService.announceJoinRequest(coupleCode, joinerName, joinerDeviceId)
+
+    suspend fun checkPendingJoinRequest(coupleCode: String, myDeviceId: String) =
+        syncService.checkPendingJoinRequest(coupleCode, myDeviceId)
+
+    suspend fun confirmJoinAccepted(coupleCode: String, partnerDeviceId: String) =
+        syncService.confirmJoinAccepted(coupleCode, partnerDeviceId)
 }

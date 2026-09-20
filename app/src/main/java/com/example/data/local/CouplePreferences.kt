@@ -47,8 +47,18 @@ class CouplePreferences(context: Context) {
             googleAccountEmail = prefs.getString("google_account_email", null),
             googleAccountName = prefs.getString("google_account_name", null),
             googleAccountPhotoUrl = prefs.getString("google_account_photo", null),
-            isGoogleLinked = prefs.getBoolean("is_google_linked", false)
+            isGoogleLinked = prefs.getBoolean("is_google_linked", false),
+            autoSyncIntervalMinutes = prefs.getInt("auto_sync_interval_minutes", 15)
         )
+    }
+
+    fun getDeviceId(): String {
+        var id = prefs.getString("unique_device_id", null)
+        if (id.isNullOrBlank()) {
+            id = java.util.UUID.randomUUID().toString()
+            prefs.edit().putString("unique_device_id", id).apply()
+        }
+        return id
     }
 
     fun updateProfile(
@@ -67,7 +77,8 @@ class CouplePreferences(context: Context) {
         googleAccountEmail: String? = null,
         googleAccountName: String? = null,
         googleAccountPhotoUrl: String? = null,
-        isGoogleLinked: Boolean? = null
+        isGoogleLinked: Boolean? = null,
+        autoSyncIntervalMinutes: Int? = null
     ) {
         val editor = prefs.edit()
         val current = _coupleProfile.value
@@ -88,6 +99,7 @@ class CouplePreferences(context: Context) {
         val newGoogleName = if (googleAccountName != null) (if (googleAccountName.isBlank()) null else googleAccountName) else current.googleAccountName
         val newGooglePhoto = googleAccountPhotoUrl ?: current.googleAccountPhotoUrl
         val newGoogleLinked = isGoogleLinked ?: current.isGoogleLinked
+        val newAutoSyncInterval = autoSyncIntervalMinutes ?: current.autoSyncIntervalMinutes
 
         editor.putString("my_name", newMyName)
         editor.putString("partner_name", newPartnerName)
@@ -100,6 +112,7 @@ class CouplePreferences(context: Context) {
         editor.putString("app_theme_mode", newAppTheme)
         editor.putString("widget_theme_mode", newWidgetTheme)
         editor.putString("app_language", newLanguage)
+        editor.putInt("auto_sync_interval_minutes", newAutoSyncInterval)
         if (newGoogleEmail != null) editor.putString("google_account_email", newGoogleEmail) else editor.remove("google_account_email")
         if (newGoogleName != null) editor.putString("google_account_name", newGoogleName) else editor.remove("google_account_name")
         if (newGooglePhoto != null) editor.putString("google_account_photo", newGooglePhoto) else editor.remove("google_account_photo")
@@ -126,7 +139,8 @@ class CouplePreferences(context: Context) {
             googleAccountEmail = newGoogleEmail,
             googleAccountName = newGoogleName,
             googleAccountPhotoUrl = newGooglePhoto,
-            isGoogleLinked = newGoogleLinked
+            isGoogleLinked = newGoogleLinked,
+            autoSyncIntervalMinutes = newAutoSyncInterval
         )
     }
 
@@ -202,39 +216,46 @@ class CouplePreferences(context: Context) {
         )
     }
 
-    private fun loadNoteCategories(): List<NoteCategory> {
+    private fun loadAllNoteCategoriesFromStorage(): MutableList<NoteCategory> {
         val json = prefs.getString("note_categories_json", null)
         if (json.isNullOrBlank()) {
-            return NoteCategory.DEFAULT_CATEGORIES
+            return NoteCategory.DEFAULT_CATEGORIES.toMutableList()
         }
         return try {
             val array = JSONArray(json)
             val list = mutableListOf<NoteCategory>()
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
-                val isDeleted = obj.optBoolean("isDeleted", false)
-                if (!isDeleted) {
-                    list.add(
-                        NoteCategory(
-                            id = obj.optString("id", UUID.randomUUID().toString()),
-                            displayName = obj.optString("displayName", "General"),
-                            iconEmoji = obj.optString("iconEmoji", "📝"),
-                            defaultColorHex = obj.optString("defaultColorHex", "#EDE9FE"),
-                            isCustom = obj.optBoolean("isCustom", false),
-                            updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
-                            isDeleted = false
-                        )
+                list.add(
+                    NoteCategory(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        displayName = obj.optString("displayName", "General"),
+                        iconEmoji = obj.optString("iconEmoji", "📝"),
+                        defaultColorHex = obj.optString("defaultColorHex", "#EDE9FE"),
+                        isCustom = obj.optBoolean("isCustom", false),
+                        updatedAt = obj.optLong("updatedAt", 0L),
+                        isDeleted = obj.optBoolean("isDeleted", false)
                     )
-                }
+                )
             }
-            if (list.isEmpty()) NoteCategory.DEFAULT_CATEGORIES else list
+            if (list.isEmpty()) NoteCategory.DEFAULT_CATEGORIES.toMutableList() else list
         } catch (e: Exception) {
-            NoteCategory.DEFAULT_CATEGORIES
+            NoteCategory.DEFAULT_CATEGORIES.toMutableList()
         }
     }
 
+    private fun loadNoteCategories(): List<NoteCategory> {
+        val all = loadAllNoteCategoriesFromStorage()
+        val active = all.filter { !it.isDeleted }
+        return if (active.isEmpty()) listOf(NoteCategory.GENERAL) else active
+    }
+
+    fun getAllNoteCategoriesForSync(): List<NoteCategory> {
+        return loadAllNoteCategoriesFromStorage()
+    }
+
     fun saveNoteCategories(categories: List<NoteCategory>) {
-        _noteCategories.value = categories
+        _noteCategories.value = categories.filter { !it.isDeleted }.ifEmpty { listOf(NoteCategory.GENERAL) }
         try {
             val array = JSONArray()
             categories.forEach { cat ->
@@ -255,83 +276,100 @@ class CouplePreferences(context: Context) {
     }
 
     fun addOrUpdateNoteCategory(category: NoteCategory) {
-        val current = _noteCategories.value.toMutableList()
-        val index = current.indexOfFirst { it.id == category.id }
+        val all = loadAllNoteCategoriesFromStorage()
+        val index = all.indexOfFirst { it.id == category.id }
+        val updated = category.copy(
+            updatedAt = System.currentTimeMillis(),
+            isDeleted = false,
+            isCustom = true
+        )
         if (index >= 0) {
-            current[index] = category.copy(updatedAt = System.currentTimeMillis())
+            all[index] = updated
         } else {
-            current.add(category.copy(updatedAt = System.currentTimeMillis()))
+            all.add(updated)
         }
-        saveNoteCategories(current)
+        saveNoteCategories(all)
     }
 
     fun deleteNoteCategory(categoryId: String) {
-        val current = _noteCategories.value.filter { it.id != categoryId }
-        // Ensure at least General category remains
-        val finalCategories = if (current.isEmpty()) listOf(NoteCategory.GENERAL) else current
-        saveNoteCategories(finalCategories)
+        val all = loadAllNoteCategoriesFromStorage()
+        val index = all.indexOfFirst { it.id == categoryId }
+        val now = System.currentTimeMillis()
+        if (index >= 0) {
+            all[index] = all[index].copy(isDeleted = true, updatedAt = now)
+        } else {
+            val defaultMatch = NoteCategory.DEFAULT_CATEGORIES.firstOrNull { it.id == categoryId }
+            val tombstone = defaultMatch?.copy(isDeleted = true, updatedAt = now)
+                ?: NoteCategory(id = categoryId, displayName = categoryId, isDeleted = true, updatedAt = now)
+            all.add(tombstone)
+        }
+        saveNoteCategories(all)
     }
 
     fun mergeRemoteNoteCategories(remoteCats: List<NoteCategory>) {
         if (remoteCats.isEmpty()) return
-        val current = _noteCategories.value.toMutableList()
+        val all = loadAllNoteCategoriesFromStorage()
         var changed = false
 
         for (remote in remoteCats) {
-            val index = current.indexOfFirst { it.id == remote.id }
+            val index = all.indexOfFirst { it.id == remote.id }
             if (index >= 0) {
-                val existing = current[index]
-                if (remote.isDeleted) {
-                    current.removeAt(index)
-                    changed = true
-                } else if (remote.updatedAt > existing.updatedAt) {
-                    current[index] = remote
+                val existing = all[index]
+                if (remote.updatedAt > existing.updatedAt) {
+                    all[index] = remote
                     changed = true
                 }
-            } else if (!remote.isDeleted) {
-                current.add(remote)
+            } else {
+                all.add(remote)
                 changed = true
             }
         }
 
         if (changed) {
-            saveNoteCategories(current)
+            saveNoteCategories(all)
         }
     }
 
-    private fun loadAppointmentCategories(): List<AppointmentCategory> {
+    private fun loadAllAppointmentCategoriesFromStorage(): MutableList<AppointmentCategory> {
         val json = prefs.getString("appointment_categories_json", null)
         if (json.isNullOrBlank()) {
-            return AppointmentCategory.DEFAULT_CATEGORIES
+            return AppointmentCategory.DEFAULT_CATEGORIES.toMutableList()
         }
         return try {
             val array = JSONArray(json)
             val list = mutableListOf<AppointmentCategory>()
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
-                val isDeleted = obj.optBoolean("isDeleted", false)
-                if (!isDeleted) {
-                    list.add(
-                        AppointmentCategory(
-                            id = obj.optString("id", UUID.randomUUID().toString()),
-                            displayName = obj.optString("displayName", "Other"),
-                            iconEmoji = obj.optString("iconEmoji", "📌"),
-                            defaultColorHex = obj.optString("defaultColorHex", "#8B5CF6"),
-                            isCustom = obj.optBoolean("isCustom", false),
-                            updatedAt = obj.optLong("updatedAt", System.currentTimeMillis()),
-                            isDeleted = false
-                        )
+                list.add(
+                    AppointmentCategory(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        displayName = obj.optString("displayName", "Other"),
+                        iconEmoji = obj.optString("iconEmoji", "📌"),
+                        defaultColorHex = obj.optString("defaultColorHex", "#8B5CF6"),
+                        isCustom = obj.optBoolean("isCustom", false),
+                        updatedAt = obj.optLong("updatedAt", 0L),
+                        isDeleted = obj.optBoolean("isDeleted", false)
                     )
-                }
+                )
             }
-            if (list.isEmpty()) AppointmentCategory.DEFAULT_CATEGORIES else list
+            if (list.isEmpty()) AppointmentCategory.DEFAULT_CATEGORIES.toMutableList() else list
         } catch (e: Exception) {
-            AppointmentCategory.DEFAULT_CATEGORIES
+            AppointmentCategory.DEFAULT_CATEGORIES.toMutableList()
         }
     }
 
+    private fun loadAppointmentCategories(): List<AppointmentCategory> {
+        val all = loadAllAppointmentCategoriesFromStorage()
+        val active = all.filter { !it.isDeleted }
+        return if (active.isEmpty()) listOf(AppointmentCategory.OTHER) else active
+    }
+
+    fun getAllAppointmentCategoriesForSync(): List<AppointmentCategory> {
+        return loadAllAppointmentCategoriesFromStorage()
+    }
+
     fun saveAppointmentCategories(categories: List<AppointmentCategory>) {
-        _appointmentCategories.value = categories
+        _appointmentCategories.value = categories.filter { !it.isDeleted }.ifEmpty { listOf(AppointmentCategory.OTHER) }
         try {
             val array = JSONArray()
             categories.forEach { cat ->
@@ -352,46 +390,57 @@ class CouplePreferences(context: Context) {
     }
 
     fun addOrUpdateAppointmentCategory(category: AppointmentCategory) {
-        val current = _appointmentCategories.value.toMutableList()
-        val index = current.indexOfFirst { it.id == category.id }
+        val all = loadAllAppointmentCategoriesFromStorage()
+        val index = all.indexOfFirst { it.id == category.id }
+        val updated = category.copy(
+            updatedAt = System.currentTimeMillis(),
+            isDeleted = false,
+            isCustom = true
+        )
         if (index >= 0) {
-            current[index] = category.copy(updatedAt = System.currentTimeMillis())
+            all[index] = updated
         } else {
-            current.add(category.copy(updatedAt = System.currentTimeMillis()))
+            all.add(updated)
         }
-        saveAppointmentCategories(current)
+        saveAppointmentCategories(all)
     }
 
     fun deleteAppointmentCategory(categoryId: String) {
-        val current = _appointmentCategories.value.filter { it.id != categoryId }
-        val finalCategories = if (current.isEmpty()) listOf(AppointmentCategory.OTHER) else current
-        saveAppointmentCategories(finalCategories)
+        val all = loadAllAppointmentCategoriesFromStorage()
+        val index = all.indexOfFirst { it.id == categoryId }
+        val now = System.currentTimeMillis()
+        if (index >= 0) {
+            all[index] = all[index].copy(isDeleted = true, updatedAt = now)
+        } else {
+            val defaultMatch = AppointmentCategory.DEFAULT_CATEGORIES.firstOrNull { it.id == categoryId }
+            val tombstone = defaultMatch?.copy(isDeleted = true, updatedAt = now)
+                ?: AppointmentCategory(id = categoryId, displayName = categoryId, isDeleted = true, updatedAt = now)
+            all.add(tombstone)
+        }
+        saveAppointmentCategories(all)
     }
 
     fun mergeRemoteAppointmentCategories(remoteCats: List<AppointmentCategory>) {
         if (remoteCats.isEmpty()) return
-        val current = _appointmentCategories.value.toMutableList()
+        val all = loadAllAppointmentCategoriesFromStorage()
         var changed = false
 
         for (remote in remoteCats) {
-            val index = current.indexOfFirst { it.id == remote.id }
+            val index = all.indexOfFirst { it.id == remote.id }
             if (index >= 0) {
-                val existing = current[index]
-                if (remote.isDeleted) {
-                    current.removeAt(index)
-                    changed = true
-                } else if (remote.updatedAt > existing.updatedAt) {
-                    current[index] = remote
+                val existing = all[index]
+                if (remote.updatedAt > existing.updatedAt) {
+                    all[index] = remote
                     changed = true
                 }
-            } else if (!remote.isDeleted) {
-                current.add(remote)
+            } else {
+                all.add(remote)
                 changed = true
             }
         }
 
         if (changed) {
-            saveAppointmentCategories(current)
+            saveAppointmentCategories(all)
         }
     }
 

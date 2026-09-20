@@ -16,12 +16,12 @@ data class NoteCategory(
     val defaultDisplayName: String get() = displayName
 
     companion object {
-        val GENERAL = NoteCategory("GENERAL", "General", "📝", "#EDE9FE")
-        val DATE_IDEAS = NoteCategory("DATE_IDEAS", "Date Ideas", "🥂", "#FCE7F3")
-        val SHOPPING = NoteCategory("SHOPPING", "Shopping", "🛒", "#E0F2FE")
-        val LOVE_NOTE = NoteCategory("LOVE_NOTE", "Love Notes", "💕", "#FFE4E6")
-        val TODO = NoteCategory("TODO", "To-Do", "✅", "#FEF3C7")
-        val TRAVEL = NoteCategory("TRAVEL", "Travel", "✈️", "#DCFCE7")
+        val GENERAL = NoteCategory("GENERAL", "General", "📝", "#EDE9FE", isCustom = false, updatedAt = 0L)
+        val DATE_IDEAS = NoteCategory("DATE_IDEAS", "Date Ideas", "🥂", "#FCE7F3", isCustom = false, updatedAt = 0L)
+        val SHOPPING = NoteCategory("SHOPPING", "Shopping", "🛒", "#E0F2FE", isCustom = false, updatedAt = 0L)
+        val LOVE_NOTE = NoteCategory("LOVE_NOTE", "Love Notes", "💕", "#FFE4E6", isCustom = false, updatedAt = 0L)
+        val TODO = NoteCategory("TODO", "To-Do", "✅", "#FEF3C7", isCustom = false, updatedAt = 0L)
+        val TRAVEL = NoteCategory("TRAVEL", "Travel", "✈️", "#DCFCE7", isCustom = false, updatedAt = 0L)
 
         val DEFAULT_CATEGORIES: List<NoteCategory> = listOf(
             DATE_IDEAS,

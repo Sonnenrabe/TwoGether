@@ -13,6 +13,7 @@ import com.example.data.model.CoupleProfile
 import com.example.data.model.Note
 import com.example.data.model.NoteCategory
 import com.example.data.model.OwnerType
+import com.example.data.model.PartnerLinkRequest
 import com.example.data.model.SyncState
 import com.example.data.remote.GoogleDriveBackupPayload
 import com.example.data.remote.GoogleDriveFileMetadata
@@ -24,7 +25,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -120,6 +126,13 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     private val _editingNote = MutableStateFlow<Note?>(null)
     private val _isManageCategoriesDialogOpen = MutableStateFlow(false)
     private val _manageCategoriesInitialTab = MutableStateFlow(0)
+
+    // Partner link request StateFlow
+    private val _pendingLinkRequest = MutableStateFlow<PartnerLinkRequest?>(null)
+    val pendingLinkRequest: StateFlow<PartnerLinkRequest?> = _pendingLinkRequest.asStateFlow()
+    private val _dismissedPartnerDeviceIds = mutableSetOf<String>()
+
+    private var autoSyncJob: Job? = null
 
     val coupleProfile: StateFlow<CoupleProfile> = couplePreferences.coupleProfile
 
@@ -270,6 +283,79 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
                 syncNotes()
             }
         }
+
+        // Reactively start or update auto-sync loop whenever interval setting changes
+        viewModelScope.launch {
+            couplePreferences.coupleProfile
+                .map { it.autoSyncIntervalMinutes }
+                .distinctUntilChanged()
+                .collect { interval ->
+                    startAutoSyncLoop(interval)
+                }
+        }
+
+        // Periodically check if partner entered our couple code while unpaired
+        viewModelScope.launch {
+            while (isActive) {
+                val profile = couplePreferences.coupleProfile.value
+                if (!profile.isPaired && profile.coupleCode.isNotBlank() && _pendingLinkRequest.value == null) {
+                    try {
+                        val req = repository.checkPendingJoinRequest(profile.coupleCode, couplePreferences.getDeviceId())
+                        if (req != null && !_dismissedPartnerDeviceIds.contains(req.partnerDeviceId)) {
+                            _pendingLinkRequest.value = req
+                        }
+                    } catch (e: Exception) {
+                        // Ignore periodic network errors
+                    }
+                }
+                delay(4000L)
+            }
+        }
+    }
+
+    private fun startAutoSyncLoop(intervalMinutes: Int) {
+        autoSyncJob?.cancel()
+        if (intervalMinutes <= 0) return
+
+        autoSyncJob = viewModelScope.launch {
+            while (isActive) {
+                delay(intervalMinutes * 60 * 1000L)
+                val currentProfile = couplePreferences.coupleProfile.value
+                if (currentProfile.isPaired && currentProfile.coupleCode.isNotBlank()) {
+                    syncWithPartner()
+                    syncNotes()
+                }
+            }
+        }
+    }
+
+    fun updateAutoSyncInterval(intervalMinutes: Int) {
+        couplePreferences.updateProfile(autoSyncIntervalMinutes = intervalMinutes)
+    }
+
+    fun acceptPartnerLink(request: PartnerLinkRequest) {
+        viewModelScope.launch {
+            repository.confirmJoinAccepted(request.coupleCode, request.partnerDeviceId)
+            val pName = if (request.partnerName.isNotBlank() && request.partnerName != "Partner") {
+                request.partnerName
+            } else {
+                couplePreferences.coupleProfile.value.partnerName
+            }
+            couplePreferences.updateProfile(
+                isPaired = true,
+                partnerName = pName
+            )
+            _pendingLinkRequest.value = null
+            syncWithPartner()
+            syncNotes()
+            val isDe = couplePreferences.coupleProfile.value.appLanguage == "DE"
+            _newCreatedAlert.value = if (isDe) "Erfolgreich mit $pName verbunden! 💕" else "Successfully linked with $pName! 💕"
+        }
+    }
+
+    fun dismissPartnerLink(request: PartnerLinkRequest) {
+        _dismissedPartnerDeviceIds.add(request.partnerDeviceId)
+        _pendingLinkRequest.value = null
     }
 
     fun switchMainTab(tab: MainNavigationTab) {
@@ -519,9 +605,11 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             _syncState.value = SyncState.SYNCING
             _syncMessage.value = "Syncing with partner..."
 
-            val result = repository.syncWithPartner(code)
-            if (result.isSuccess) {
-                val count = result.getOrDefault(0)
+            val apptResult = repository.syncWithPartner(code)
+            val noteResult = noteRepository.syncNotesWithPartner(code)
+
+            if (apptResult.isSuccess || noteResult.isSuccess) {
+                val count = apptResult.getOrDefault(0) + noteResult.getOrDefault(0)
                 _syncState.value = SyncState.SUCCESS
                 _syncMessage.value = if (count > 0) "Synced! ($count new updates)" else "Up to date with partner 💕"
             } else {
@@ -564,8 +652,22 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
 
     fun joinCoupleCode(code: String, partnerName: String) {
         viewModelScope.launch {
-            couplePreferences.joinCoupleCode(code, partnerName)
+            val cleanCode = code.uppercase().trim()
+            val currentProfile = couplePreferences.coupleProfile.value
+            val myName = if (currentProfile.myName.isNotBlank() && currentProfile.myName != "You") {
+                currentProfile.myName
+            } else if (!currentProfile.googleAccountName.isNullOrBlank()) {
+                currentProfile.googleAccountName
+            } else {
+                "Partner"
+            }
+            val myDeviceId = couplePreferences.getDeviceId()
+
+            couplePreferences.joinCoupleCode(cleanCode, partnerName)
+            // Announce join request so original owner gets instant popup
+            repository.announceJoinRequest(cleanCode, myName, myDeviceId)
             syncWithPartner()
+            syncNotes()
         }
     }
 

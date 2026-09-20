@@ -26,7 +26,7 @@ data class AppointmentEntity(
     val hasReminder: Boolean,
     val reminderMinutesBefore: Int
 ) {
-    fun toDomain(): Appointment {
+    fun toDomain(availableCategories: List<AppointmentCategory> = emptyList()): Appointment {
         return Appointment(
             id = id,
             title = title,
@@ -37,7 +37,7 @@ data class AppointmentEntity(
             isAllDay = isAllDay,
             ownerType = OwnerType.fromString(ownerType),
             createdByName = createdByName,
-            category = AppointmentCategory.fromString(category),
+            category = AppointmentCategory.fromString(category, availableCategories.ifEmpty { AppointmentCategory.DEFAULT_CATEGORIES }),
             colorHex = colorHex,
             coupleId = coupleId,
             updatedAt = updatedAt,

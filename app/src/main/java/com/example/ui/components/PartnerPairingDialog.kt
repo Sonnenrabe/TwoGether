@@ -39,6 +39,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.R
 import com.example.data.model.CoupleProfile
+import com.example.data.model.PartnerLinkRequest
 import com.example.ui.util.AppStrings
 
 @Composable
@@ -61,7 +62,11 @@ fun PartnerPairingDialog(
     onRegenerateCode: () -> Unit = {},
     onUnlinkPartner: (keepOwnEvents: Boolean) -> Unit = {},
     onSimulatePartnerPlan: () -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    onUpdateAutoSyncInterval: (Int) -> Unit = {},
+    pendingLinkRequest: PartnerLinkRequest? = null,
+    onAcceptPartnerLink: (PartnerLinkRequest) -> Unit = {},
+    onDismissPartnerLink: (PartnerLinkRequest) -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -605,6 +610,73 @@ fun PartnerPairingDialog(
 
                             Spacer(modifier = Modifier.height(12.dp))
 
+                            // Incoming Partner Link Request Card (if partner entered our code)
+                            if (pendingLinkRequest != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("card_incoming_partner_request")
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Favorite,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = if (isDe) "Verbindungsanfrage! 💕" else "Link Request! 💕",
+                                                style = MaterialTheme.typography.titleMedium.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        val reqName = if (pendingLinkRequest.partnerName.isNotBlank() && pendingLinkRequest.partnerName != "Partner")
+                                            pendingLinkRequest.partnerName
+                                        else if (isDe) "Dein Partner" else "Your partner"
+                                        Text(
+                                            text = if (isDe)
+                                                "$reqName hat deinen Paar-Code ${pendingLinkRequest.coupleCode} eingegeben! Möchtest du eure Apps jetzt automatisch verbinden?"
+                                            else
+                                                "$reqName entered your Couple Code ${pendingLinkRequest.coupleCode}! Would you like to link up and sync automatically?",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontSize = 12.5.sp
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Button(
+                                                onClick = { onAcceptPartnerLink(pendingLinkRequest) },
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.weight(1f).testTag("btn_accept_partner_link_dialog")
+                                            ) {
+                                                Icon(imageVector = Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(if (isDe) "Jetzt verbinden 💕" else "Link Up Now 💕", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            }
+                                            OutlinedButton(
+                                                onClick = { onDismissPartnerLink(pendingLinkRequest) },
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.testTag("btn_dismiss_partner_link_dialog")
+                                            ) {
+                                                Text(if (isDe) "Später" else "Not Now", fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+
                             // Pairing Status Card
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
@@ -746,29 +818,6 @@ fun PartnerPairingDialog(
                                             Text(if (isDe) "Neu" else "New", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
-
-                                    Spacer(modifier = Modifier.height(8.dp))
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.CloudDone,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = if (isDe) "60 Mio.+ Kombinationen • Dauerhafte Firebase Cloud-Sync" else "60M+ Combinations • Permanent Firebase Cloud Sync",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontSize = 10.sp,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        )
-                                    }
                                 }
                             }
 
@@ -834,7 +883,85 @@ fun PartnerPairingDialog(
                                 Text(t("connect_partner"), fontWeight = FontWeight.Bold)
                             }
 
-                            Spacer(modifier = Modifier.height(20.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Auto-Sync Interval Setting Card
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth().testTag("card_auto_sync_interval")
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Sync,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = if (isDe) "Auto-Sync Intervall" else "Auto-Sync Interval",
+                                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                            Text(
+                                                text = if (isDe)
+                                                    "Wie oft die App Daten automatisch synchronisiert"
+                                                else
+                                                    "How often the app syncs data automatically",
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    fontSize = 11.sp
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    val intervals = listOf(
+                                        1 to (if (isDe) "1 Min" else "1 min"),
+                                        5 to (if (isDe) "5 Min" else "5 min"),
+                                        15 to (if (isDe) "15 Min" else "15 min"),
+                                        30 to (if (isDe) "30 Min" else "30 min"),
+                                        60 to (if (isDe) "1 Std" else "1 hr"),
+                                        0 to (if (isDe) "Manuell" else "Manual")
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        intervals.forEach { (mins, label) ->
+                                            val isSelected = profile.autoSyncIntervalMinutes == mins
+                                            FilterChip(
+                                                selected = isSelected,
+                                                onClick = { onUpdateAutoSyncInterval(mins) },
+                                                label = {
+                                                    Text(
+                                                        text = label,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        maxLines = 1
+                                                    )
+                                                },
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .testTag("chip_sync_interval_$mins"),
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                                                ),
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
 
                             // Dedicated UNLINK PARTNER Button
                             OutlinedButton(

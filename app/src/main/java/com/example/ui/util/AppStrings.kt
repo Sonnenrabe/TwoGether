@@ -1,6 +1,7 @@
 package com.example.ui.util
 
 import com.example.data.model.AppointmentCategory
+import com.example.data.model.NoteCategory
 import com.example.data.model.OwnerType
 
 object AppStrings {
@@ -58,6 +59,10 @@ object AppStrings {
 
     fun getCategoryName(category: AppointmentCategory, lang: String): String {
         if (category.isCustom) return category.displayName
+        val defaultEnglish = AppointmentCategory.DEFAULT_CATEGORIES.firstOrNull { it.id == category.id }?.displayName
+        if (defaultEnglish != null && category.displayName != defaultEnglish) {
+            return category.displayName
+        }
         val resolved = resolveLangCode(lang)
         return when (resolved) {
             "DE" -> when (category.id) {
@@ -120,6 +125,24 @@ object AppStrings {
                 "OTHER" -> "Other"
                 else -> category.displayName
             }
+        }
+    }
+
+    fun getNoteCategoryName(category: NoteCategory, lang: String): String {
+        if (category.isCustom) return category.displayName
+        val defaultEnglish = NoteCategory.DEFAULT_CATEGORIES.firstOrNull { it.id == category.id }?.displayName
+        if (defaultEnglish != null && category.displayName != defaultEnglish) {
+            return category.displayName
+        }
+        val t = { key: String -> get(lang, key) }
+        return when (category.id) {
+            NoteCategory.GENERAL.id -> t("filter_cat_general")
+            NoteCategory.DATE_IDEAS.id -> t("filter_cat_date_ideas")
+            NoteCategory.SHOPPING.id -> t("filter_cat_shopping")
+            NoteCategory.LOVE_NOTE.id -> t("filter_cat_love_notes")
+            NoteCategory.TODO.id -> t("filter_cat_todo")
+            NoteCategory.TRAVEL.id -> t("filter_cat_travel")
+            else -> category.displayName
         }
     }
 

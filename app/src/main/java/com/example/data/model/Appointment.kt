@@ -27,15 +27,15 @@ data class AppointmentCategory(
     val defaultDisplayName: String get() = displayName
 
     companion object {
-        val DATE_NIGHT = AppointmentCategory("DATE_NIGHT", "Date Night", "🥂", "#E11D48")
-        val TOGETHER_PLAN = AppointmentCategory("TOGETHER_PLAN", "Together", "💜", "#8B5CF6")
-        val WORK = AppointmentCategory("WORK", "Work", "💼", "#0284C7")
-        val HEALTH = AppointmentCategory("HEALTH", "Health & Doctor", "🩺", "#059669")
-        val TRAVEL = AppointmentCategory("TRAVEL", "Travel & Trip", "✈️", "#D97706")
-        val HOME_CHORE = AppointmentCategory("HOME_CHORE", "Home & Errands", "🏠", "#EA580C")
-        val CELEBRATION = AppointmentCategory("CELEBRATION", "Celebration", "🎂", "#DB2777")
-        val PERSONAL = AppointmentCategory("PERSONAL", "Personal", "👤", "#4B5563")
-        val OTHER = AppointmentCategory("OTHER", "Other", "📌", "#6B7280")
+        val DATE_NIGHT = AppointmentCategory("DATE_NIGHT", "Date Night", "🥂", "#E11D48", isCustom = false, updatedAt = 0L)
+        val TOGETHER_PLAN = AppointmentCategory("TOGETHER_PLAN", "Together", "💜", "#8B5CF6", isCustom = false, updatedAt = 0L)
+        val WORK = AppointmentCategory("WORK", "Work", "💼", "#0284C7", isCustom = false, updatedAt = 0L)
+        val HEALTH = AppointmentCategory("HEALTH", "Health & Doctor", "🩺", "#059669", isCustom = false, updatedAt = 0L)
+        val TRAVEL = AppointmentCategory("TRAVEL", "Travel & Trip", "✈️", "#D97706", isCustom = false, updatedAt = 0L)
+        val HOME_CHORE = AppointmentCategory("HOME_CHORE", "Home & Errands", "🏠", "#EA580C", isCustom = false, updatedAt = 0L)
+        val CELEBRATION = AppointmentCategory("CELEBRATION", "Celebration", "🎂", "#DB2777", isCustom = false, updatedAt = 0L)
+        val PERSONAL = AppointmentCategory("PERSONAL", "Personal", "👤", "#4B5563", isCustom = false, updatedAt = 0L)
+        val OTHER = AppointmentCategory("OTHER", "Other", "📌", "#6B7280", isCustom = false, updatedAt = 0L)
 
         val DEFAULT_CATEGORIES: List<AppointmentCategory> = listOf(
             DATE_NIGHT,
@@ -98,7 +98,15 @@ data class CoupleProfile(
     val googleAccountEmail: String? = null,
     val googleAccountName: String? = null,
     val googleAccountPhotoUrl: String? = null,
-    val isGoogleLinked: Boolean = false
+    val isGoogleLinked: Boolean = false,
+    val autoSyncIntervalMinutes: Int = 15
+)
+
+data class PartnerLinkRequest(
+    val coupleCode: String = "",
+    val partnerName: String = "",
+    val partnerDeviceId: String = "",
+    val timestamp: Long = 0L
 )
 
 enum class SyncState {

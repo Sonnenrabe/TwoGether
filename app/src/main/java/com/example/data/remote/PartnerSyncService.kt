@@ -7,6 +7,7 @@ import com.example.data.model.AppointmentCategory
 import com.example.data.model.Note
 import com.example.data.model.NoteCategory
 import com.example.data.model.OwnerType
+import com.example.data.model.PartnerLinkRequest
 import com.example.util.CoupleCryptoUtil
 import com.example.util.EncryptedPayload
 import com.squareup.moshi.JsonClass
@@ -40,7 +41,7 @@ data class RemoteAppointment(
     val hasReminder: Boolean = false,
     val reminderMinutesBefore: Int = 30
 ) {
-    fun toDomain(): Appointment {
+    fun toDomain(availableCategories: List<AppointmentCategory> = emptyList()): Appointment {
         return Appointment(
             id = id,
             title = title,
@@ -51,7 +52,7 @@ data class RemoteAppointment(
             isAllDay = isAllDay,
             ownerType = OwnerType.fromString(ownerType),
             createdByName = createdByName,
-            category = AppointmentCategory.fromString(category),
+            category = AppointmentCategory.fromString(category, availableCategories.ifEmpty { AppointmentCategory.DEFAULT_CATEGORIES }),
             colorHex = colorHex,
             coupleId = coupleId,
             updatedAt = updatedAt,
@@ -101,12 +102,12 @@ data class RemoteNote(
     val updatedAt: Long = 0L,
     val isDeleted: Boolean = false
 ) {
-    fun toDomain(): Note {
+    fun toDomain(availableCategories: List<NoteCategory> = emptyList()): Note {
         return Note(
             id = id,
             title = title,
             content = content,
-            category = NoteCategory.fromString(category),
+            category = NoteCategory.fromString(category, availableCategories.ifEmpty { NoteCategory.DEFAULT_CATEGORIES }),
             ownerType = OwnerType.fromString(ownerType),
             createdByName = createdByName,
             colorHex = colorHex,
@@ -227,7 +228,12 @@ data class RemoteSyncEnvelope(
     val appointments: List<RemoteAppointment> = emptyList(),
     val notes: List<RemoteNote> = emptyList(),
     val noteCategories: List<RemoteNoteCategory> = emptyList(),
-    val appointmentCategories: List<RemoteAppointmentCategory> = emptyList()
+    val appointmentCategories: List<RemoteAppointmentCategory> = emptyList(),
+    val joinRequesterName: String = "",
+    val joinRequesterDeviceId: String = "",
+    val joinRequesterTimestamp: Long = 0L,
+    val isLinkRequested: Boolean = false,
+    val isLinkAccepted: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -399,6 +405,13 @@ class PartnerSyncService {
                 put("iv", org.json.JSONObject().put("stringValue", envelope.iv))
                 put("ciphertext", org.json.JSONObject().put("stringValue", envelope.ciphertext))
                 put("lastActiveMillis", org.json.JSONObject().put("integerValue", now.toString()))
+                if (envelope.isLinkRequested) {
+                    put("isLinkRequested", org.json.JSONObject().put("booleanValue", true))
+                    put("joinRequesterName", org.json.JSONObject().put("stringValue", envelope.joinRequesterName))
+                    put("joinRequesterDeviceId", org.json.JSONObject().put("stringValue", envelope.joinRequesterDeviceId))
+                    put("joinRequesterTimestamp", org.json.JSONObject().put("integerValue", envelope.joinRequesterTimestamp.toString()))
+                    put("isLinkAccepted", org.json.JSONObject().put("booleanValue", envelope.isLinkAccepted))
+                }
             }
             val payload = org.json.JSONObject().apply {
                 put("fields", fields)
@@ -548,7 +561,12 @@ class PartnerSyncService {
                             algorithm = fields.optJSONObject("algorithm")?.optString("stringValue") ?: "AES-256-GCM",
                             salt = fields.optJSONObject("salt")?.optString("stringValue") ?: "",
                             iv = fields.optJSONObject("iv")?.optString("stringValue") ?: "",
-                            ciphertext = fields.optJSONObject("ciphertext")?.optString("stringValue") ?: ""
+                            ciphertext = fields.optJSONObject("ciphertext")?.optString("stringValue") ?: "",
+                            joinRequesterName = fields.optJSONObject("joinRequesterName")?.optString("stringValue") ?: "",
+                            joinRequesterDeviceId = fields.optJSONObject("joinRequesterDeviceId")?.optString("stringValue") ?: "",
+                            joinRequesterTimestamp = fields.optJSONObject("joinRequesterTimestamp")?.optString("integerValue")?.toLongOrNull() ?: 0L,
+                            isLinkRequested = fields.optJSONObject("isLinkRequested")?.optBoolean("booleanValue") ?: false,
+                            isLinkAccepted = fields.optJSONObject("isLinkAccepted")?.optBoolean("booleanValue") ?: false
                         )
                         cloudRelayMemory[cleanCode] = envelope
                         Log.d("PartnerSync", "Fetched encrypted envelope from Firebase Firestore for $cleanCode")
@@ -805,8 +823,8 @@ class PartnerSyncService {
             val remoteList = appointments.map { RemoteAppointment.fromDomain(it) }
             val remoteCatList = categories.map { RemoteAppointmentCategory.fromDomain(it) }
 
-            // Retrieve and decrypt existing cloud relay data
-            val existingEnvelope = cloudRelayMemory[coupleCode]
+            // Retrieve and decrypt existing cloud relay data from persistent cloud
+            val existingEnvelope = pullFromPersistentCloud(coupleCode) ?: cloudRelayMemory[coupleCode]
             val existingContent = if (existingEnvelope != null) {
                 decryptSyncEnvelope(existingEnvelope, coupleCode)
             } else {
@@ -872,7 +890,7 @@ class PartnerSyncService {
             val remoteNotesList = notes.map { RemoteNote.fromDomain(it) }
             val remoteCatsList = categories.map { RemoteNoteCategory.fromDomain(it) }
 
-            val existingEnvelope = cloudRelayMemory[coupleCode]
+            val existingEnvelope = pullFromPersistentCloud(coupleCode) ?: cloudRelayMemory[coupleCode]
             val existingContent = if (existingEnvelope != null) {
                 decryptSyncEnvelope(existingEnvelope, coupleCode)
             } else {
@@ -1004,5 +1022,78 @@ class PartnerSyncService {
     fun importEncryptedBackupJson(jsonString: String, userEmail: String): GoogleCloudBackupEnvelope? {
         val envelope = googleBackupAdapter.fromJson(jsonString) ?: return null
         return decryptGoogleBackup(envelope, userEmail)
+    }
+
+    /**
+     * Announces that a partner has entered the couple code to link up.
+     * This triggers an automatic link prompt on the original code creator's screen.
+     */
+    suspend fun announceJoinRequest(
+        coupleCode: String,
+        joinerName: String,
+        joinerDeviceId: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val cleanCode = coupleCode.uppercase().trim()
+        if (cleanCode.isBlank()) return@withContext Result.failure(IllegalArgumentException("Code is blank"))
+        try {
+            val existing = pullFromPersistentCloud(cleanCode) ?: cloudRelayMemory[cleanCode] ?: RemoteSyncEnvelope(coupleCode = cleanCode)
+            val updated = existing.copy(
+                isLinkRequested = true,
+                joinRequesterName = joinerName,
+                joinRequesterDeviceId = joinerDeviceId,
+                joinRequesterTimestamp = System.currentTimeMillis(),
+                isLinkAccepted = false
+            )
+            cloudRelayMemory[cleanCode] = updated
+            pushToPersistentCloud(cleanCode, updated)
+            Log.d("PartnerSync", "Announced join request for $cleanCode from $joinerName ($joinerDeviceId)")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("PartnerSync", "Error announcing join request: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Checks if another device has requested to link using this couple code.
+     */
+    suspend fun checkPendingJoinRequest(coupleCode: String, myDeviceId: String): PartnerLinkRequest? = withContext(Dispatchers.IO) {
+        val cleanCode = coupleCode.uppercase().trim()
+        if (cleanCode.isBlank()) return@withContext null
+        try {
+            val envelope = pullFromPersistentCloud(cleanCode) ?: cloudRelayMemory[cleanCode]
+            if (envelope != null && envelope.isLinkRequested && !envelope.isLinkAccepted) {
+                if (envelope.joinRequesterDeviceId.isNotBlank() && envelope.joinRequesterDeviceId != myDeviceId) {
+                    return@withContext PartnerLinkRequest(
+                        coupleCode = cleanCode,
+                        partnerName = envelope.joinRequesterName,
+                        partnerDeviceId = envelope.joinRequesterDeviceId,
+                        timestamp = envelope.joinRequesterTimestamp
+                    )
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Marks the join request as accepted so the prompt is not shown again.
+     */
+    suspend fun confirmJoinAccepted(coupleCode: String, partnerDeviceId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val cleanCode = coupleCode.uppercase().trim()
+        if (cleanCode.isBlank()) return@withContext Result.failure(IllegalArgumentException("Code is blank"))
+        try {
+            val existing = pullFromPersistentCloud(cleanCode) ?: cloudRelayMemory[cleanCode]
+            if (existing != null) {
+                val updated = existing.copy(isLinkAccepted = true)
+                cloudRelayMemory[cleanCode] = updated
+                pushToPersistentCloud(cleanCode, updated)
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

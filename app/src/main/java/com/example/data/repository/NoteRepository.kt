@@ -14,6 +14,7 @@ import com.example.data.remote.PartnerSyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -26,8 +27,11 @@ class NoteRepository(
 ) {
 
     val allActiveNotes: Flow<List<Note>> =
-        noteDao.getAllActiveNotes().map { list ->
-            list.map { it.toDomain() }
+        combine(
+            noteDao.getAllActiveNotes(),
+            couplePreferences.noteCategories
+        ) { list, cats ->
+            list.map { it.toDomain(cats) }
         }
 
     val noteCategories: StateFlow<List<NoteCategory>> = couplePreferences.noteCategories
@@ -80,7 +84,8 @@ class NoteRepository(
     }
 
     suspend fun getNoteById(id: String): Note? {
-        return noteDao.getNoteById(id)?.toDomain()
+        val cats = couplePreferences.noteCategories.value
+        return noteDao.getNoteById(id)?.toDomain(cats)
     }
 
     suspend fun saveNote(note: Note, autoSync: Boolean = true) = withContext(Dispatchers.IO) {
@@ -152,9 +157,9 @@ class NoteRepository(
                 }
             }
 
-            // 4. Push combined state (notes and categories) back to remote
-            val currentCategories = couplePreferences.noteCategories.value
-            syncService.pushNotes(coupleCode, localMap.values.toList(), currentCategories)
+            // 4. Push combined state (notes and categories including tombstones) back to remote
+            val syncCategories = couplePreferences.getAllNoteCategoriesForSync()
+            syncService.pushNotes(coupleCode, localMap.values.toList(), syncCategories)
 
             Result.success(mergedCount)
         } catch (e: Exception) {

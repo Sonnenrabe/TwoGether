@@ -149,15 +149,7 @@ fun NotebookScreen(
 
                     categories.forEach { cat ->
                         val isSel = selectedCategory?.id == cat.id
-                        val catLabel = when (cat.id) {
-                            NoteCategory.GENERAL.id -> t("filter_cat_general")
-                            NoteCategory.DATE_IDEAS.id -> t("filter_cat_date_ideas")
-                            NoteCategory.SHOPPING.id -> t("filter_cat_shopping")
-                            NoteCategory.LOVE_NOTE.id -> t("filter_cat_love_notes")
-                            NoteCategory.TODO.id -> t("filter_cat_todo")
-                            NoteCategory.TRAVEL.id -> t("filter_cat_travel")
-                            else -> cat.displayName
-                        }
+                        val catLabel = AppStrings.getNoteCategoryName(cat, profile.appLanguage)
                         FilterChip(
                             selected = isSel,
                             onClick = { onSelectCategory(if (isSel) null else cat) },
@@ -462,7 +454,7 @@ fun NoteCard(
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
                     ) {
                         Text(
-                            text = "${note.category.iconEmoji} ${note.category.defaultDisplayName}",
+                            text = "${note.category.iconEmoji} ${AppStrings.getNoteCategoryName(note.category, profile.appLanguage)}",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
