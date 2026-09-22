@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import com.example.data.local.AppDatabase
 import com.example.util.AppointmentReminderScheduler
+import com.example.util.BackgroundSyncScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -23,6 +24,9 @@ class BootReceiver : BroadcastReceiver() {
                     val appointments = db.appointmentDao().getAllActiveAppointmentsList().map { it.toDomain() }
                     val scheduler = AppointmentReminderScheduler(context)
                     scheduler.rescheduleAllReminders(appointments)
+
+                    // Reschedule background sync (even when app is not open)
+                    BackgroundSyncScheduler.scheduleNextSync(context)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 } finally {

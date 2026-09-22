@@ -55,6 +55,11 @@
             android:name=".receiver.AppointmentAlarmReceiver"
             android:exported="false" />
 
+        <!-- Periodic Background Sync Receiver (runs when app is closed) -->
+        <receiver
+            android:name=".receiver.BackgroundSyncReceiver"
+            android:exported="false" />
+
         <!-- Reboot & App Update Receiver to Reschedule Reminders -->
         <receiver
             android:name=".receiver.BootReceiver"

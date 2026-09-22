@@ -301,6 +301,13 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+
+            // Ensure background periodic sync is armed according to preferences
+            try {
+                com.example.util.BackgroundSyncScheduler.scheduleNextSync(application)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
 
         // Reactively start or update auto-sync loop whenever interval setting changes
@@ -350,6 +357,7 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
 
     fun updateAutoSyncInterval(intervalMinutes: Int) {
         couplePreferences.updateProfile(autoSyncIntervalMinutes = intervalMinutes)
+        com.example.util.BackgroundSyncScheduler.scheduleNextSync(getApplication())
     }
 
     fun acceptPartnerLink(request: PartnerLinkRequest) {
@@ -369,6 +377,7 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             syncNotes()
             val isDe = couplePreferences.coupleProfile.value.appLanguage == "DE"
             _newCreatedAlert.value = if (isDe) "Erfolgreich mit $pName verbunden! 💕" else "Successfully linked with $pName! 💕"
+            com.example.util.BackgroundSyncScheduler.scheduleNextSync(getApplication())
         }
     }
 
@@ -418,6 +427,10 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch {
             noteRepository.saveNote(note)
+            val coupleCode = couplePreferences.coupleProfile.value.coupleCode
+            if (coupleCode.isNotBlank()) {
+                noteRepository.syncNotesWithPartner(coupleCode)
+            }
         }
     }
 
@@ -430,6 +443,10 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch {
             noteRepository.deleteNote(id)
+            val coupleCode = couplePreferences.coupleProfile.value.coupleCode
+            if (coupleCode.isNotBlank()) {
+                noteRepository.syncNotesWithPartner(coupleCode)
+            }
         }
     }
 
@@ -623,6 +640,10 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
             repository.saveAppointment(toSave)
             // Schedule high-priority alarm notification for appointment
             reminderScheduler.scheduleReminder(toSave)
+            // Always push changes to cloud immediately
+            if (coupleCode.isNotBlank()) {
+                repository.syncWithPartner(coupleCode)
+            }
         }
     }
 
@@ -635,6 +656,11 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             repository.deleteAppointment(id)
             reminderScheduler.cancelReminder(id)
+            // Always push changes to cloud immediately
+            val coupleCode = couplePreferences.coupleProfile.value.coupleCode
+            if (coupleCode.isNotBlank()) {
+                repository.syncWithPartner(coupleCode)
+            }
         }
     }
 
@@ -737,6 +763,7 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             repository.unlinkPartner(keepOwnEvents)
             noteRepository.deletePartnerNotes()
+            com.example.util.BackgroundSyncScheduler.cancelSync(getApplication())
             _newCreatedAlert.value = "Partner unlinked successfully. Ready for a new couple code!"
         }
     }

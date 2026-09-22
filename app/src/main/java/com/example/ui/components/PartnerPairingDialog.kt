@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -34,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -93,6 +95,12 @@ fun PartnerPairingDialog(
     var partnerName by remember { mutableStateOf(profile.partnerName) }
     var joinCodeInput by remember { mutableStateOf("") }
     var joinPartnerNameInput by remember { mutableStateOf("") }
+    var syncIntervalMinutesInput by remember(profile.autoSyncIntervalMinutes) {
+        mutableStateOf(if (profile.autoSyncIntervalMinutes > 0) profile.autoSyncIntervalMinutes.toString() else "60")
+    }
+    var isManualSyncOnly by remember(profile.autoSyncIntervalMinutes) {
+        mutableStateOf(profile.autoSyncIntervalMinutes <= 0)
+    }
 
     var myColorHex by remember { mutableStateOf(profile.myColorHex) }
     var partnerColorHex by remember { mutableStateOf(profile.partnerColorHex) }
@@ -550,9 +558,10 @@ fun PartnerPairingDialog(
                         Triple(
                             0,
                             t("pairing_tab"),
-                            if (profile.partnerName.isNotBlank() && profile.coupleCode.isNotBlank())
-                                "${if (isDe) "Verbunden mit" else "Linked with"} ${profile.partnerName} • Auto-Sync: ${profile.autoSyncIntervalMinutes}m"
-                            else
+                            if (profile.partnerName.isNotBlank() && profile.coupleCode.isNotBlank()) {
+                                val syncInfo = if (profile.autoSyncIntervalMinutes <= 0) (if (isDe) "Manuell" else "Manual") else "${profile.autoSyncIntervalMinutes}m"
+                                "${if (isDe) "Verbunden mit" else "Linked with"} ${profile.partnerName} • Auto-Sync: $syncInfo"
+                            } else
                                 "Code: ${profile.coupleCode} • ${if (isDe) "Mit Partner verbinden" else "Connect with partner"}"
                         ),
                         // 3: Design
@@ -1029,8 +1038,8 @@ fun PartnerPairingDialog(
                             OutlinedTextField(
                                 value = joinCodeInput,
                                 onValueChange = { joinCodeInput = it.uppercase() },
-                                label = { Text(if (isDe) "Code eingeben (z.B. LOVE-421)" else "Enter 6-digit Code (e.g. LOVE-421)") },
-                                placeholder = { Text("LOVE-421") },
+                                label = { Text(if (isDe) "Partner-Code eingeben" else "Enter partner code") },
+                                placeholder = { Text(if (isDe) "Partner-Code eingeben" else "Enter partner code") },
                                 singleLine = true,
                                 leadingIcon = { Icon(imageVector = Icons.Filled.Link, contentDescription = null) },
                                 modifier = Modifier
@@ -1095,14 +1104,14 @@ fun PartnerPairingDialog(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
                                             Text(
-                                                text = if (isDe) "Auto-Sync Intervall" else "Auto-Sync Interval",
+                                                text = if (isDe) "Sync-Intervall" else "Sync Interval",
                                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                                             )
                                             Text(
                                                 text = if (isDe)
-                                                    "Wie oft die App Daten automatisch synchronisiert"
+                                                    "Hintergrund-Abgleich auch bei geschlossener App (aktualisiert das Widget)"
                                                 else
-                                                    "How often the app syncs data automatically",
+                                                    "Background sync even when app is closed (keeps widget updated)",
                                                 style = MaterialTheme.typography.bodySmall.copy(
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     fontSize = 11.sp
@@ -1111,44 +1120,174 @@ fun PartnerPairingDialog(
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Spacer(modifier = Modifier.height(12.dp))
 
-                                    val intervals = listOf(
-                                        1 to (if (isDe) "1 Min" else "1 min"),
-                                        5 to (if (isDe) "5 Min" else "5 min"),
-                                        15 to (if (isDe) "15 Min" else "15 min"),
-                                        30 to (if (isDe) "30 Min" else "30 min"),
-                                        60 to (if (isDe) "1 Std" else "1 hr"),
-                                        0 to (if (isDe) "Manuell" else "Manual")
-                                    )
-
+                                    // Mode Switcher: Automatic Interval vs Manual Only
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        intervals.forEach { (mins, label) ->
-                                            val isSelected = profile.autoSyncIntervalMinutes == mins
-                                            FilterChip(
-                                                selected = isSelected,
-                                                onClick = { onUpdateAutoSyncInterval(mins) },
-                                                label = {
-                                                    Text(
-                                                        text = label,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        maxLines = 1
-                                                    )
-                                                },
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .testTag("chip_sync_interval_$mins"),
-                                                colors = FilterChipDefaults.filterChipColors(
-                                                    selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                                                ),
-                                                shape = RoundedCornerShape(8.dp)
-                                            )
+                                        FilterChip(
+                                            selected = !isManualSyncOnly,
+                                            onClick = {
+                                                isManualSyncOnly = false
+                                                val parsed = syncIntervalMinutesInput.toIntOrNull() ?: 60
+                                                val validMins = if (parsed > 0) parsed else 60
+                                                syncIntervalMinutesInput = validMins.toString()
+                                                onUpdateAutoSyncInterval(validMins)
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Schedule,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = if (isDe) "Automatisch" else "Automatic",
+                                                    fontWeight = if (!isManualSyncOnly) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            modifier = Modifier.weight(1f).testTag("chip_sync_mode_auto"),
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                                selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                                            ),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+
+                                        FilterChip(
+                                            selected = isManualSyncOnly,
+                                            onClick = {
+                                                isManualSyncOnly = true
+                                                onUpdateAutoSyncInterval(0)
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Filled.TouchApp,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = if (isDe) "Nur manuell" else "Manual only",
+                                                    fontWeight = if (isManualSyncOnly) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            modifier = Modifier.weight(1f).testTag("chip_sync_mode_manual"),
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                                selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                                            ),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    if (!isManualSyncOnly) {
+                                        // Number input box for sync interval in minutes
+                                        OutlinedTextField(
+                                            value = syncIntervalMinutesInput,
+                                            onValueChange = { input ->
+                                                val filtered = input.filter { it.isDigit() }.take(4)
+                                                syncIntervalMinutesInput = filtered
+                                                val mins = filtered.toIntOrNull()
+                                                if (mins != null && mins > 0) {
+                                                    onUpdateAutoSyncInterval(mins)
+                                                }
+                                            },
+                                            label = { Text(if (isDe) "Intervall in Minuten" else "Interval in minutes") },
+                                            placeholder = { Text(if (isDe) "z.B. 60 für 1 Stunde" else "e.g. 60 for 1 hour") },
+                                            suffix = {
+                                                Text(
+                                                    text = if (isDe) "Min" else "min",
+                                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                                )
+                                            },
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("input_sync_interval_minutes"),
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // Quick Presets
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            listOf(15, 30, 60, 120).forEach { mins ->
+                                                val isCurrent = profile.autoSyncIntervalMinutes == mins
+                                                AssistChip(
+                                                    onClick = {
+                                                        syncIntervalMinutesInput = mins.toString()
+                                                        onUpdateAutoSyncInterval(mins)
+                                                    },
+                                                    label = {
+                                                        Text(
+                                                            text = when (mins) {
+                                                                60 -> if (isDe) "1 Std" else "1 hr"
+                                                                120 -> if (isDe) "2 Std" else "2 hrs"
+                                                                else -> "${mins}m"
+                                                            },
+                                                            fontSize = 11.sp,
+                                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                                                        )
+                                                    },
+                                                    colors = AssistChipDefaults.assistChipColors(
+                                                        containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                                                    ),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
                                         }
+                                    } else {
+                                        Text(
+                                            text = if (isDe)
+                                                "Synchronisiert nur beim Öffnen der App oder wenn du auf 'Sync' tippst."
+                                            else
+                                                "Only syncs when opening the app or when you tap 'Sync'.",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 11.sp
+                                            ),
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Clear reassurance note: Immediate cloud push
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.CloudUpload,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isDe)
+                                                "Änderungen werden immer sofort in die Cloud geladen, sobald du etwas änderst."
+                                            else
+                                                "Changes are always pushed to the cloud as soon as you change something.",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 11.sp
+                                            )
+                                        )
                                     }
                                 }
                             }
