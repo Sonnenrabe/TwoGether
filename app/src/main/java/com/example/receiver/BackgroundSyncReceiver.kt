@@ -24,35 +24,51 @@ class BackgroundSyncReceiver : BroadcastReceiver() {
                 val intervalMinutes = profile.autoSyncIntervalMinutes
                 val coupleCode = profile.coupleCode
 
-                if (intervalMinutes > 0 && coupleCode.isNotBlank()) {
+                if (coupleCode.isNotBlank()) {
                     val db = AppDatabase.getInstance(context)
                     val apptRepo = AppointmentRepository(context, db.appointmentDao(), prefs)
                     val noteRepo = NoteRepository(context, db.noteDao(), prefs)
 
-                    // 1. Sync appointments & categories
-                    try {
-                        apptRepo.syncWithPartner(coupleCode)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
+                    if (profile.isPaired && intervalMinutes > 0) {
+                        // 1. Sync appointments & categories
+                        try {
+                            apptRepo.syncWithPartner(coupleCode)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
 
-                    // 2. Sync notes
-                    try {
-                        noteRepo.syncNotesWithPartner(coupleCode)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
+                        // 2. Sync notes
+                        try {
+                            noteRepo.syncNotesWithPartner(coupleCode)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
 
-                    // 3. Reschedule reminders for any new appointments from partner
-                    try {
-                        val allActive = apptRepo.getAllActiveAppointments()
-                        AppointmentReminderScheduler(context).rescheduleAllReminders(allActive)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
+                        // 3. Reschedule reminders for any new appointments from partner
+                        try {
+                            val allActive = apptRepo.getAllActiveAppointments()
+                            AppointmentReminderScheduler(context).rescheduleAllReminders(allActive)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
 
-                    // 4. Force widget refresh so home screen widget immediately shows partner's updates
-                    WidgetUpdateHelper.updateAllWidgets(context)
+                        // 4. Force widget refresh so home screen widget immediately shows partner's updates
+                        WidgetUpdateHelper.updateAllWidgets(context)
+                    } else if (!profile.isPaired) {
+                        // Check if partner submitted a join request while app was closed
+                        try {
+                            val req = apptRepo.checkPendingJoinRequest(coupleCode, prefs.getDeviceId())
+                            if (req != null) {
+                                com.example.util.PartnerNotificationHelper.notifyPartnerLinkRequest(
+                                    context = context,
+                                    partnerName = req.partnerName,
+                                    lang = profile.appLanguage
+                                )
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

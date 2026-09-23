@@ -144,16 +144,40 @@ class NoteRepository(
             var mergedCount = 0
 
             // 3. Merge remote notes into local
+            val newPartnerNotes = mutableListOf<Note>()
+            val partnerName = couplePreferences.coupleProfile.value.partnerName
+            val appLang = couplePreferences.coupleProfile.value.appLanguage
+
             for (remote in remoteNotes) {
                 val local = localMap[remote.id]
                 if (local == null) {
                     noteDao.insertOrUpdate(NoteEntity.fromDomain(remote))
                     localMap[remote.id] = remote
                     mergedCount++
+                    if (!remote.isDeleted && remote.ownerType != OwnerType.ME) {
+                        newPartnerNotes.add(remote)
+                    }
                 } else if (remote.updatedAt > local.updatedAt) {
                     noteDao.insertOrUpdate(NoteEntity.fromDomain(remote))
                     localMap[remote.id] = remote
                     mergedCount++
+                    if (!remote.isDeleted && remote.ownerType != OwnerType.ME) {
+                        newPartnerNotes.add(remote)
+                    }
+                }
+            }
+
+            // Trigger messenger-like background notification for partner notes
+            for (newNote in newPartnerNotes) {
+                try {
+                    com.example.util.PartnerNotificationHelper.notifyPartnerNote(
+                        context = context,
+                        partnerName = partnerName,
+                        note = newNote,
+                        lang = appLang
+                    )
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             }
 

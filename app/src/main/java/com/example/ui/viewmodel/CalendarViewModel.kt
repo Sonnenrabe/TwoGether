@@ -320,22 +320,54 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
                 }
         }
 
+        // Ensure our couple code is registered online so partner can link to it immediately
+        viewModelScope.launch {
+            val code = couplePreferences.coupleProfile.value.coupleCode
+            if (code.isNotBlank()) {
+                repository.registerCoupleCodeOnline(code)
+            }
+        }
+
         // Periodically check if partner entered our couple code while unpaired
         viewModelScope.launch {
             while (isActive) {
                 val profile = couplePreferences.coupleProfile.value
                 if (!profile.isPaired && profile.coupleCode.isNotBlank() && _pendingLinkRequest.value == null) {
+                    checkForPendingLinkRequestInternal(profile.coupleCode)
+                }
+                delay(1500L)
+            }
+        }
+    }
+
+    fun checkForPendingLinkRequest() {
+        val profile = couplePreferences.coupleProfile.value
+        if (profile.coupleCode.isNotBlank() && _pendingLinkRequest.value == null) {
+            viewModelScope.launch {
+                checkForPendingLinkRequestInternal(profile.coupleCode)
+            }
+        }
+    }
+
+    private suspend fun checkForPendingLinkRequestInternal(coupleCode: String) {
+        try {
+            val req = repository.checkPendingJoinRequest(coupleCode, couplePreferences.getDeviceId())
+            if (req != null && !_dismissedPartnerDeviceIds.contains(req.partnerDeviceId)) {
+                if (_pendingLinkRequest.value?.partnerDeviceId != req.partnerDeviceId) {
                     try {
-                        val req = repository.checkPendingJoinRequest(profile.coupleCode, couplePreferences.getDeviceId())
-                        if (req != null && !_dismissedPartnerDeviceIds.contains(req.partnerDeviceId)) {
-                            _pendingLinkRequest.value = req
-                        }
+                        com.example.util.PartnerNotificationHelper.notifyPartnerLinkRequest(
+                            context = getApplication(),
+                            partnerName = req.partnerName,
+                            lang = couplePreferences.coupleProfile.value.appLanguage
+                        )
                     } catch (e: Exception) {
-                        // Ignore periodic network errors
+                        e.printStackTrace()
                     }
                 }
-                delay(4000L)
+                _pendingLinkRequest.value = req
             }
+        } catch (e: Exception) {
+            // Ignore periodic network errors
         }
     }
 
@@ -755,6 +787,7 @@ class CalendarViewModel(application: Application) : AndroidViewModel(application
     fun regenerateCoupleCode() {
         viewModelScope.launch {
             val newCode = repository.generateNewVerifiedCoupleCode()
+            repository.registerCoupleCodeOnline(newCode)
             _newCreatedAlert.value = "Neuer Paar-Code: $newCode"
         }
     }

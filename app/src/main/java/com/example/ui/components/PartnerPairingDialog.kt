@@ -70,10 +70,18 @@ fun PartnerPairingDialog(
     onUpdateAutoSyncInterval: (Int) -> Unit = {},
     pendingLinkRequest: PartnerLinkRequest? = null,
     onAcceptPartnerLink: (PartnerLinkRequest) -> Unit = {},
-    onDismissPartnerLink: (PartnerLinkRequest) -> Unit = {}
+    onDismissPartnerLink: (PartnerLinkRequest) -> Unit = {},
+    onCheckPendingLinkRequest: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(-1) }
+
+    LaunchedEffect(Unit) {
+        onCheckPendingLinkRequest()
+    }
+    LaunchedEffect(selectedTab) {
+        onCheckPendingLinkRequest()
+    }
 
     val createDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -457,6 +465,77 @@ fun PartnerPairingDialog(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
+                // Incoming Partner Link Request Banner (Visible immediately regardless of open tab)
+                if (pendingLinkRequest != null) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+                        shadowElevation = 8.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
+                            .testTag("card_incoming_partner_request_top")
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Filled.Favorite,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = if (isDe) "Verbindungsanfrage erhalten! 💕" else "Link Request Received! 💕",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val reqName = if (pendingLinkRequest.partnerName.isNotBlank() && pendingLinkRequest.partnerName != "Partner")
+                                pendingLinkRequest.partnerName
+                            else if (isDe) "Dein Partner" else "Your partner"
+                            Text(
+                                text = if (isDe)
+                                    "$reqName hat deinen Paar-Code ${pendingLinkRequest.coupleCode} eingegeben! Möchtest du eure Apps jetzt automatisch verbinden?"
+                                else
+                                    "$reqName entered your Couple Code ${pendingLinkRequest.coupleCode}! Would you like to link up and sync automatically?",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        onAcceptPartnerLink(pendingLinkRequest)
+                                        onDismiss()
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("btn_accept_partner_link_dialog_top")
+                                ) {
+                                    Icon(imageVector = Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(if (isDe) "Jetzt verbinden 💕" else "Link Up Now 💕", fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = { onDismissPartnerLink(pendingLinkRequest) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.testTag("btn_dismiss_partner_link_dialog_top")
+                                ) {
+                                    Text(if (isDe) "Später" else "Not Now")
+                                }
+                            }
+                        }
+                    }
+                }
                 if (selectedTab == -1) {
                     // Header for Settings Categories Overview
                     Row(
@@ -1069,7 +1148,12 @@ fun PartnerPairingDialog(
                                     if (joinCodeInput.isNotBlank()) {
                                         val pName = if (joinPartnerNameInput.isNotBlank()) joinPartnerNameInput.trim() else profile.partnerName
                                         onJoinCode(joinCodeInput.trim(), pName)
-                                        Toast.makeText(context, if (isDe) "Mit Kalender $joinCodeInput verbunden!" else "Connected to couple calendar $joinCodeInput!", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(
+                                            context,
+                                            if (isDe) "Verbindungsanfrage an $joinCodeInput gesendet! Dein Partner erhält jetzt die Bestätigung. 💕"
+                                            else "Connection request sent to $joinCodeInput! Your partner will receive the prompt now. 💕",
+                                            Toast.LENGTH_LONG
+                                        ).show()
                                         onDismiss()
                                     }
                                 },
@@ -1190,7 +1274,7 @@ fun PartnerPairingDialog(
                                     Spacer(modifier = Modifier.height(10.dp))
 
                                     if (!isManualSyncOnly) {
-                                        // Number input box for sync interval in minutes
+                                        // Clean box where you enter the number of minutes
                                         OutlinedTextField(
                                             value = syncIntervalMinutesInput,
                                             onValueChange = { input ->
@@ -1201,12 +1285,15 @@ fun PartnerPairingDialog(
                                                     onUpdateAutoSyncInterval(mins)
                                                 }
                                             },
-                                            label = { Text(if (isDe) "Intervall in Minuten" else "Interval in minutes") },
-                                            placeholder = { Text(if (isDe) "z.B. 60 für 1 Stunde" else "e.g. 60 for 1 hour") },
+                                            label = { Text(if (isDe) "Alle wie vielen Minuten synchronisieren?" else "Sync every X minutes") },
+                                            placeholder = { Text("60") },
                                             suffix = {
                                                 Text(
-                                                    text = if (isDe) "Min" else "min",
-                                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                                    text = if (isDe) "Minuten" else "minutes",
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
                                                 )
                                             },
                                             singleLine = true,
@@ -1216,39 +1303,6 @@ fun PartnerPairingDialog(
                                                 .testTag("input_sync_interval_minutes"),
                                             shape = RoundedCornerShape(12.dp)
                                         )
-
-                                        Spacer(modifier = Modifier.height(8.dp))
-
-                                        // Quick Presets
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            listOf(15, 30, 60, 120).forEach { mins ->
-                                                val isCurrent = profile.autoSyncIntervalMinutes == mins
-                                                AssistChip(
-                                                    onClick = {
-                                                        syncIntervalMinutesInput = mins.toString()
-                                                        onUpdateAutoSyncInterval(mins)
-                                                    },
-                                                    label = {
-                                                        Text(
-                                                            text = when (mins) {
-                                                                60 -> if (isDe) "1 Std" else "1 hr"
-                                                                120 -> if (isDe) "2 Std" else "2 hrs"
-                                                                else -> "${mins}m"
-                                                            },
-                                                            fontSize = 11.sp,
-                                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
-                                                        )
-                                                    },
-                                                    colors = AssistChipDefaults.assistChipColors(
-                                                        containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-                                                    ),
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                            }
-                                        }
                                     } else {
                                         Text(
                                             text = if (isDe)

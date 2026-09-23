@@ -623,7 +623,8 @@ fun CalendarHomeScreen(
             onUpdateAutoSyncInterval = { interval -> viewModel.updateAutoSyncInterval(interval) },
             pendingLinkRequest = pendingLinkRequest,
             onAcceptPartnerLink = { req -> viewModel.acceptPartnerLink(req) },
-            onDismissPartnerLink = { req -> viewModel.dismissPartnerLink(req) }
+            onDismissPartnerLink = { req -> viewModel.dismissPartnerLink(req) },
+            onCheckPendingLinkRequest = { viewModel.checkForPendingLinkRequest() }
         )
     }
 

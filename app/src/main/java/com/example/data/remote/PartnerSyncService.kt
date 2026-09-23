@@ -662,10 +662,43 @@ class PartnerSyncService {
     }
 
     /**
+     * Registers a new couple code in persistent cloud so it exists immediately.
+     */
+    suspend fun registerCoupleCodeOnline(coupleCode: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val cleanCode = coupleCode.uppercase().trim()
+        if (cleanCode.isBlank()) return@withContext Result.failure(IllegalArgumentException("Code is blank"))
+        try {
+            val firestoreUrl = "$FIRESTORE_BASE_URL/couple_sync/$cleanCode?key=$FIREBASE_API_KEY"
+            val req = Request.Builder().url(firestoreUrl).get().build()
+            val exists = client.newCall(req).execute().use { it.isSuccessful }
+            if (!exists) {
+                val now = System.currentTimeMillis()
+                val fields = org.json.JSONObject().apply {
+                    put("coupleCode", org.json.JSONObject().put("stringValue", cleanCode))
+                    put("lastUpdated", org.json.JSONObject().put("integerValue", now.toString()))
+                    put("isEncrypted", org.json.JSONObject().put("booleanValue", false))
+                }
+                val payload = org.json.JSONObject().put("fields", fields)
+                val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                val patchReq = Request.Builder().url(firestoreUrl).patch(body).build()
+                client.newCall(patchReq).execute().close()
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Encrypts sync content with the couple's private coupleCode into an AES-256-GCM envelope.
      * Plaintext lists are emptied out so no sensitive data appears in the JSON or over the wire.
+     * Preserves any pending link request metadata so background sync does not erase pairing handshakes.
      */
-    private fun encryptSyncContent(content: DecryptedSyncContent, coupleCode: String): RemoteSyncEnvelope {
+    private fun encryptSyncContent(
+        content: DecryptedSyncContent,
+        coupleCode: String,
+        existingEnvelope: RemoteSyncEnvelope? = null
+    ): RemoteSyncEnvelope {
         val json = decryptedSyncAdapter.toJson(content)
         val encrypted = CoupleCryptoUtil.encrypt(json, coupleCode.trim())
         return RemoteSyncEnvelope(
@@ -679,7 +712,12 @@ class PartnerSyncService {
             appointments = emptyList(),
             notes = emptyList(),
             noteCategories = emptyList(),
-            appointmentCategories = emptyList()
+            appointmentCategories = emptyList(),
+            joinRequesterName = existingEnvelope?.joinRequesterName ?: "",
+            joinRequesterDeviceId = existingEnvelope?.joinRequesterDeviceId ?: "",
+            joinRequesterTimestamp = existingEnvelope?.joinRequesterTimestamp ?: 0L,
+            isLinkRequested = existingEnvelope?.isLinkRequested ?: false,
+            isLinkAccepted = existingEnvelope?.isLinkAccepted ?: false
         )
     }
 
@@ -859,8 +897,8 @@ class PartnerSyncService {
                 appointmentCategories = catMap.values.toList()
             )
 
-            // Encrypt merged content using coupleCode
-            val encryptedEnvelope = encryptSyncContent(mergedContent, coupleCode)
+            // Encrypt merged content using coupleCode, preserving any pending handshake flags
+            val encryptedEnvelope = encryptSyncContent(mergedContent, coupleCode, existingEnvelope)
             cloudRelayMemory[coupleCode] = encryptedEnvelope
 
             // Persistently store encrypted payload in the cloud
@@ -923,7 +961,7 @@ class PartnerSyncService {
                 appointmentCategories = existingContent.appointmentCategories
             )
 
-            val encryptedEnvelope = encryptSyncContent(mergedContent, coupleCode)
+            val encryptedEnvelope = encryptSyncContent(mergedContent, coupleCode, existingEnvelope)
             cloudRelayMemory[coupleCode] = encryptedEnvelope
 
             // Persistently store encrypted payload in the cloud
@@ -1027,6 +1065,8 @@ class PartnerSyncService {
     /**
      * Announces that a partner has entered the couple code to link up.
      * This triggers an automatic link prompt on the original code creator's screen.
+     * Writes to an isolated document couple_sync/REQ_CODE so that background calendar sync
+     * can NEVER overwrite or clear this pending handshake.
      */
     suspend fun announceJoinRequest(
         coupleCode: String,
@@ -1035,13 +1075,30 @@ class PartnerSyncService {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val cleanCode = coupleCode.uppercase().trim()
         if (cleanCode.isBlank()) return@withContext Result.failure(IllegalArgumentException("Code is blank"))
+        val now = System.currentTimeMillis()
         try {
+            // 1. Primary: Write to dedicated handshake document couple_sync/REQ_CODE
+            val reqDocUrl = "$FIRESTORE_BASE_URL/couple_sync/REQ_$cleanCode?key=$FIREBASE_API_KEY"
+            val fields = org.json.JSONObject().apply {
+                put("coupleCode", org.json.JSONObject().put("stringValue", cleanCode))
+                put("joinRequesterName", org.json.JSONObject().put("stringValue", joinerName))
+                put("joinRequesterDeviceId", org.json.JSONObject().put("stringValue", joinerDeviceId))
+                put("joinRequesterTimestamp", org.json.JSONObject().put("integerValue", now.toString()))
+                put("isLinkRequested", org.json.JSONObject().put("booleanValue", true))
+                put("isLinkAccepted", org.json.JSONObject().put("booleanValue", false))
+            }
+            val payload = org.json.JSONObject().put("fields", fields)
+            val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val patchReq = Request.Builder().url(reqDocUrl).patch(body).build()
+            client.newCall(patchReq).execute().close()
+
+            // 2. Also keep preserved in main envelope and memory cache
             val existing = pullFromPersistentCloud(cleanCode) ?: cloudRelayMemory[cleanCode] ?: RemoteSyncEnvelope(coupleCode = cleanCode)
             val updated = existing.copy(
                 isLinkRequested = true,
                 joinRequesterName = joinerName,
                 joinRequesterDeviceId = joinerDeviceId,
-                joinRequesterTimestamp = System.currentTimeMillis(),
+                joinRequesterTimestamp = now,
                 isLinkAccepted = false
             )
             cloudRelayMemory[cleanCode] = updated
@@ -1056,10 +1113,44 @@ class PartnerSyncService {
 
     /**
      * Checks if another device has requested to link using this couple code.
+     * Prioritizes checking the isolated couple_sync/REQ_CODE handshake document.
      */
     suspend fun checkPendingJoinRequest(coupleCode: String, myDeviceId: String): PartnerLinkRequest? = withContext(Dispatchers.IO) {
         val cleanCode = coupleCode.uppercase().trim()
         if (cleanCode.isBlank()) return@withContext null
+
+        // 1. Primary check: isolated handshake document
+        try {
+            val reqDocUrl = "$FIRESTORE_BASE_URL/couple_sync/REQ_$cleanCode?key=$FIREBASE_API_KEY"
+            val req = Request.Builder().url(reqDocUrl).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val bodyStr = resp.body?.string() ?: ""
+                    val root = org.json.JSONObject(bodyStr)
+                    val fields = root.optJSONObject("fields")
+                    if (fields != null) {
+                        val isRequested = fields.optJSONObject("isLinkRequested")?.optBoolean("booleanValue") ?: false
+                        val isAccepted = fields.optJSONObject("isLinkAccepted")?.optBoolean("booleanValue") ?: false
+                        val devId = fields.optJSONObject("joinRequesterDeviceId")?.optString("stringValue") ?: ""
+                        val requesterName = fields.optJSONObject("joinRequesterName")?.optString("stringValue") ?: ""
+                        val timestamp = fields.optJSONObject("joinRequesterTimestamp")?.optString("integerValue")?.toLongOrNull() ?: 0L
+
+                        if (isRequested && !isAccepted && devId.isNotBlank() && devId != myDeviceId) {
+                            return@withContext PartnerLinkRequest(
+                                coupleCode = cleanCode,
+                                partnerName = requesterName,
+                                partnerDeviceId = devId,
+                                timestamp = timestamp
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Handshake document check fallback
+        }
+
+        // 2. Secondary check: main sync envelope
         try {
             val envelope = pullFromPersistentCloud(cleanCode) ?: cloudRelayMemory[cleanCode]
             if (envelope != null && envelope.isLinkRequested && !envelope.isLinkAccepted) {
@@ -1079,15 +1170,28 @@ class PartnerSyncService {
     }
 
     /**
-     * Marks the join request as accepted so the prompt is not shown again.
+     * Marks the join request as accepted in both the isolated handshake document and main envelope.
      */
     suspend fun confirmJoinAccepted(coupleCode: String, partnerDeviceId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val cleanCode = coupleCode.uppercase().trim()
         if (cleanCode.isBlank()) return@withContext Result.failure(IllegalArgumentException("Code is blank"))
         try {
+            // 1. Update isolated handshake document
+            val reqDocUrl = "$FIRESTORE_BASE_URL/couple_sync/REQ_$cleanCode?key=$FIREBASE_API_KEY"
+            val fields = org.json.JSONObject().apply {
+                put("coupleCode", org.json.JSONObject().put("stringValue", cleanCode))
+                put("isLinkRequested", org.json.JSONObject().put("booleanValue", false))
+                put("isLinkAccepted", org.json.JSONObject().put("booleanValue", true))
+            }
+            val payload = org.json.JSONObject().put("fields", fields)
+            val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val patchReq = Request.Builder().url(reqDocUrl).patch(body).build()
+            client.newCall(patchReq).execute().close()
+
+            // 2. Also update main envelope
             val existing = pullFromPersistentCloud(cleanCode) ?: cloudRelayMemory[cleanCode]
             if (existing != null) {
-                val updated = existing.copy(isLinkAccepted = true)
+                val updated = existing.copy(isLinkAccepted = true, isLinkRequested = false)
                 cloudRelayMemory[cleanCode] = updated
                 pushToPersistentCloud(cleanCode, updated)
             }

@@ -132,19 +132,43 @@ class AppointmentRepository(
                 val localEntities = appointmentDao.getAllForSync()
                 val localMap = localEntities.associateBy { it.id }.toMutableMap()
                 val toUpsert = mutableListOf<AppointmentEntity>()
+                val newPartnerAppointments = mutableListOf<Appointment>()
+                val partnerName = couplePreferences.coupleProfile.value.partnerName
+                val appLang = couplePreferences.coupleProfile.value.appLanguage
+
                 for (remote in remoteList) {
                     val local = localMap[remote.id]
                     if (local == null) {
                         toUpsert.add(AppointmentEntity.fromDomain(remote))
                         mergedCount++
+                        if (!remote.isDeleted && remote.ownerType != OwnerType.ME) {
+                            newPartnerAppointments.add(remote)
+                        }
                     } else if (remote.updatedAt > local.updatedAt) {
                         toUpsert.add(AppointmentEntity.fromDomain(remote))
                         mergedCount++
+                        if (!remote.isDeleted && remote.ownerType != OwnerType.ME) {
+                            newPartnerAppointments.add(remote)
+                        }
                     }
                 }
 
                 if (toUpsert.isNotEmpty()) {
                     appointmentDao.insertAll(toUpsert)
+                }
+
+                // Trigger messenger-like background notification for each new/updated appointment from partner
+                for (newAppt in newPartnerAppointments) {
+                    try {
+                        com.example.util.PartnerNotificationHelper.notifyPartnerAppointment(
+                            context = context,
+                            partnerName = if (newAppt.createdByName.isNotBlank() && newAppt.createdByName != "Me") newAppt.createdByName else partnerName,
+                            appointment = newAppt,
+                            lang = appLang
+                        )
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
 
@@ -343,6 +367,9 @@ class AppointmentRepository(
         }
         entities.size
     }
+
+    suspend fun registerCoupleCodeOnline(coupleCode: String) =
+        syncService.registerCoupleCodeOnline(coupleCode)
 
     suspend fun announceJoinRequest(coupleCode: String, joinerName: String, joinerDeviceId: String) =
         syncService.announceJoinRequest(coupleCode, joinerName, joinerDeviceId)
